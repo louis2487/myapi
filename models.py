@@ -10,4 +10,3 @@ class RuntimeRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, index=True)
     runtime_seconds = Column(Integer)
-    timestamp = Column(DateTime, default=datetime.utcnow)
