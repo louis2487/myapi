@@ -8,5 +8,5 @@ class RuntimeRecord(Base):
     __tablename__ = "time"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String, index=True)
+    user_id = Column(String, index=True,unique=True)
     runtime_seconds = Column(Integer)
