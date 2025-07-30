@@ -37,7 +37,6 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
         index_elements=["user_id"],  # UNIQUE 제약을 건 컬럼
         set_={
             "runtime_seconds": RuntimeRecord.runtime_seconds + payload.runtime_seconds,
-            "timestamp": datetime.utcnow()
         }
     )
 
