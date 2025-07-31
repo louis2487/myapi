@@ -61,11 +61,12 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
 
 @app.get("/runtime/{user_id}", response_model=RuntimeResponse)
 def read_runtime(user_id: str, db: Session = Depends(get_db)):
- record = (
+    record = (
         db.query(RuntimeRecord)
         .filter(RuntimeRecord.user_id == user_id)
         .first()
     )
+
 
     if not record:
         raise HTTPException(status_code=404, detail="런타임 기록을 찾을 수 없습니다.")
