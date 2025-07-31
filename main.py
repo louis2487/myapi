@@ -1,5 +1,3 @@
-# main.py
-
 import os
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException
@@ -8,11 +6,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 from models import Base, RuntimeRecord
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-from models import Base, RuntimeRecord
-from database import SessionLocal, engine
-from pydantic import BaseModel
 
 Base.metadata.create_all(bind=engine)
 
@@ -59,7 +52,7 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/runtime/{user_id}", response_model=RuntimeResponse)
+@app.get("/runtime/{user_id}", response_model=RuntimePayload)
 def read_runtime(user_id: str, db: Session = Depends(get_db)):
     record = (
         db.query(RuntimeRecord)
@@ -71,7 +64,4 @@ def read_runtime(user_id: str, db: Session = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail="런타임 기록을 찾을 수 없습니다.")
 
-    return {
-        "user_id": record.user_id,
-        "runtime_seconds": record.runtime_seconds
-    }
+    return record
