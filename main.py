@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 from models import Base, RuntimeRecord
+from models import User
+import hashlib
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,6 +24,11 @@ class RuntimePayload(BaseModel):
     user_id: str
     runtime_seconds: int
 
+    class SignupRequest(BaseModel):
+ username: str
+  email:    EmailStr
+  password: str
+
 @app.post("/runtime/update")
 def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
     stmt = insert(RuntimeRecord).values(
@@ -33,7 +40,26 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
             "runtime_seconds": RuntimeRecord.runtime_seconds + payload.runtime_seconds,
         }
     )
+    
+@app.post("/auth/post")
+def signup(req: SignupRequest, db: Session = Depends(get_db)):
 
+    if db.query(User).filter(User.username == req.username).first():
+        raise HTTPException(400, "Email already registered")
+
+    pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+
+    user = User(
+        username      = req.username,
+        email         = req.email,
+        password_hash = pw_hash
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+
+    return {"status":"ok", "user_id": user.id}
     try:
         db.execute(stmt)
         db.commit()
