@@ -24,10 +24,10 @@ class RuntimePayload(BaseModel):
     user_id: str
     runtime_seconds: int
 
-    class SignupRequest(BaseModel):
- username: str
-  email:    EmailStr
-  password: str
+class SignupRequest(BaseModel):
+    username: str
+    email:    EmailStr
+    password: str
 
 @app.post("/runtime/update")
 def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
