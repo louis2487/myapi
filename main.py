@@ -41,7 +41,7 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
         }
     )
     
-@app.post("/auth/post")
+@app.post("/auth/signup")
 def signup(req: SignupRequest, db: Session = Depends(get_db)):
 
     if db.query(User).filter(User.username == req.username).first():
