@@ -5,9 +5,9 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
-from models import Base, RuntimeRecord
-from models import User
+from models import Base, RuntimeRecord, User
 import hashlib
+import jwt 
 
 Base.metadata.create_all(bind=engine)
 
