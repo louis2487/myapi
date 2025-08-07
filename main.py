@@ -13,6 +13,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+SECRET_KEY = "your_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
 def get_db():
     db = SessionLocal()
     try:
@@ -28,6 +32,14 @@ class SignupRequest(BaseModel):
     username: str
     email:    EmailStr
     password: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    user_id: int
+    token: str
 
 
 
@@ -94,5 +106,23 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-
     return {"status":"ok", "user_id": user.id}
+
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+
+    user = db.query(User).filter(User.username == req.username).first()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    if user.password_hash != pw_hash:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+    return LoginResponse(user_id=user.id, token=token)
