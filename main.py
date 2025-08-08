@@ -126,3 +126,33 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
     return LoginResponse(user_id=user.id, token=token)
+
+
+@app.get("/recode/{username}/{date}")
+def get_recode(username: str, date: str, db: Session = Depends(get_db)):
+    recodes = db.query(models.Recode).filter(
+        models.Recode.username == username,
+        models.Recode.date == date
+    ).all()
+    return {"recodes": [
+        {
+            "username": r.username,
+            "date": r.date,
+            "ontime": r.ontime,
+            "offtime": r.offtime,
+            "duration": r.duration
+        } for r in recodes
+    ]}
+
+@app.post("/recode/add")
+def add_recode(recode: dict, db: Session = Depends(get_db)):
+    new_r = models.Recode(
+        username=recode["username"],
+        date=recode["date"],
+        ontime=recode["ontime"],
+        offtime=recode["offtime"],
+        duration=recode["duration"]
+    )
+    db.add(new_r)
+    db.commit()
+    return {"status": "success"}

@@ -19,3 +19,12 @@ class User(Base):
     username = Column(String(50), nullable=False, unique=True, index=True) 
     email = Column(String(255), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
+
+class Recode(Base):
+    __tablename__ = "recode"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, index=True)
+    date = Column(String)
+    ontime = Column(String)  
+    offtime = Column(String)   
+    duration = Column(Integer)  
