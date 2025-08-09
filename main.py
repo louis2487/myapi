@@ -57,6 +57,8 @@ class RecodeOut(BaseModel):
     ontime: str
     offtime: str
     duration: int
+    class Config:
+        orm_mode = True
 
 class RecodeListOut(BaseModel):
     recodes: list[RecodeOut]
@@ -158,8 +160,8 @@ def get_recode(username: str, date: str, db: Session = Depends(get_db)):
 
 @app.post("/recode/add")
 def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
-    new_r = models.Recode(
-      username=recode.username,
+    new_r = Recode(  
+        username=recode.username,
         date=recode.date,
         ontime=recode.ontime,
         offtime=recode.offtime,
@@ -167,4 +169,4 @@ def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
     )
     db.add(new_r)
     db.commit()
-    return {"status": "success"}
+    return {"status":"success"}
