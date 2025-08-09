@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
+import models
 from models import Base, RuntimeRecord, User, Recode
 import hashlib
 import jwt 
@@ -43,7 +44,22 @@ class LoginResponse(BaseModel):
     user_id: int
     token: str
 
+class RecodeCreate(BaseModel):
+    username: str
+    date: str
+    ontime: str
+    offtime: str
+    duration: int
 
+class RecodeOut(BaseModel):
+    username: str
+    date: str
+    ontime: str
+    offtime: str
+    duration: int
+
+class RecodeListOut(BaseModel):
+    recodes: list[RecodeOut]
 
 @app.post("/runtime/update")
 def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
@@ -130,30 +146,24 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return LoginResponse(user_id=user.id, token=token)
 
 
-@app.get("/recode/{username}/{date}")
+@app.get("/recode/{username}/{date}", response_model=RecodeListOut)
 def get_recode(username: str, date: str, db: Session = Depends(get_db)):
-    recodes = db.query(models.Recode).filter(
-        models.Recode.username == username,
-        models.Recode.date == date
-    ).all()
-    return {"recodes": [
-        {
-            "username": r.username,
-            "date": r.date,
-            "ontime": r.ontime,
-            "offtime": r.offtime,
-            "duration": r.duration
-        } for r in recodes
-    ]}
+    recodes = (
+        db.query(Recode)
+        .filter(Recode.username == username, Recode.date == date)
+        .all()
+    )
+    return {"recodes": recodes}
+
 
 @app.post("/recode/add")
-def add_recode(recode: dict, db: Session = Depends(get_db)):
+def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
     new_r = models.Recode(
-        username=recode["username"],
-        date=recode["date"],
-        ontime=recode["ontime"],
-        offtime=recode["offtime"],
-        duration=recode["duration"]
+      username=recode.username,
+        date=recode.date,
+        ontime=recode.ontime,
+        offtime=recode.offtime,
+        duration=recode.duration
     )
     db.add(new_r)
     db.commit()
