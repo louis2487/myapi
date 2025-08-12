@@ -30,7 +30,7 @@ class Recode(Base):
     duration = Column(Integer)  
 
 
-class RangeSummaryOut(BaseModel):
+class RangeSummaryOut(Base):
     username: str
     start: str
     end: str
