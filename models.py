@@ -28,3 +28,12 @@ class Recode(Base):
     ontime = Column(String)  
     offtime = Column(String)   
     duration = Column(Integer)  
+
+
+class RangeSummaryOut(BaseModel):
+    username: str
+    start: str
+    end: str
+    on_count: int
+    runtime_seconds: int
+

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut
 import hashlib
 import jwt 
 
@@ -170,3 +170,21 @@ def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
     db.add(new_r)
     db.commit()
     return {"status":"success"}
+
+
+
+@app.get("/recode/summary/{username}/{start}/{end}", response_model=RangeSummaryOut)
+def recode_summary(username: str, start: str, end: str, db: Session = Depends(get_db)):
+    cnt, total = db.query(
+        func.count(Recode.id),
+        func.coalesce(func.sum(Recode.duration), 0)
+    ).filter(
+        Recode.username == username,
+        Recode.date >= start,
+        Recode.date <= end
+    ).one()
+    return RangeSummaryOut(
+        username=username, start=start, end=end,
+        on_count=int(cnt), runtime_seconds=int(total or 0)
+    )
+
