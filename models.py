@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
+from pydantic import BaseModel
 
 Base = declarative_base()
 
@@ -30,7 +31,7 @@ class Recode(Base):
     duration = Column(Integer)  
 
 
-class RangeSummaryOut(Base):
+class RangeSummaryOut(BaseModel):
     username: str
     start: str
     end: str
