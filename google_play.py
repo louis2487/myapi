@@ -6,7 +6,7 @@ SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
 
 def get_service():
     credentials = service_account.Credentials.from_service_account_file(
-        "smartgauge-service-key.json", 
+        "server-key.json", 
         scopes=SCOPES
     )
     service = build("androidpublisher", "v3", credentials=credentials)
