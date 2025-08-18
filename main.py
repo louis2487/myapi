@@ -274,7 +274,7 @@ def verify_subscription_endpoint(
             token=payload.purchase_token,
         )
         res = req.execute()
-   except HttpError as e:
+    except HttpError as e:
         code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
         msg = e.reason if hasattr(e, "reason") else str(e)
         if code in (400, 404, 410):
