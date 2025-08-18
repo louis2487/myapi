@@ -1,21 +1,26 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut
 import hashlib
 import jwt 
 from sqlalchemy import func ,select 
-
+from google_play import get_service, PACKAGE_NAME
+import crud
+from fastapi import status, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import base64, json
+from googleapiclient.errors import HttpError
 
 
 Base.metadata.create_all(bind=engine)
-
 app = FastAPI()
+bearer = HTTPBearer(auto_error=True)
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
@@ -114,7 +119,7 @@ def read_runtime(user_id: str, db: Session = Depends(get_db)):
 def signup(req: SignupRequest, db: Session = Depends(get_db)):
 
     if db.query(User).filter(User.username == req.username).first():
-        raise HTTPException(400, "Email already registered")
+        raise HTTPException(400,  "Username already taken")
 
     pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
@@ -189,3 +194,141 @@ def recode_summary(username: str, start: str, end: str, db: Session = Depends(ge
         on_count=int(cnt), runtime_seconds=int(total or 0)
     )
 
+@app.post("/play/rtdn")
+async def play_rtdn(request: Request):
+    body = await request.json()
+    try:
+        msg = body["message"]
+        data_b64 = msg["data"]
+        payload = json.loads(base64.b64decode(data_b64).decode("utf-8"))
+     
+        print("RTDN payload:", payload)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def get_current_user_id(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> int:
+    token = creds.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    uid = payload.get("sub") or payload.get("user_id")
+    try:
+        uid = int(uid)
+    except:
+        raise HTTPException(status_code=401, detail="Invalid user id")
+
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return uid
+
+
+def _to_dt_utc(ms: int) -> datetime:
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+def _derive_status(res: dict) -> str:
+    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    expiry_ms = int(res.get("expiryTimeMillis", "0"))
+    if not expiry_ms:
+        return "INVALID"
+        
+    cancel_reason = res.get("cancelReason")     
+    account_hold = res.get("accountHold", False)  
+    payment_state = res.get("paymentState")       
+    price_change = res.get("priceChange", {}).get("state")
+
+    if account_hold:
+        return "ON_HOLD"
+    if cancel_reason is not None and expiry_ms > now_ms:
+        return "CANCELED"
+    if expiry_ms <= now_ms:
+        return "EXPIRED"
+    if payment_state == 0:
+        return "PENDING"   
+    if payment_state == 2:
+        return "TRIAL"    
+    if price_change == 1:
+        return "PRICE_CHANGE_PENDING"
+    return "ACTIVE"
+
+@app.post("/billing/verify", response_model=SubscriptionStatusOut)
+def verify_subscription_endpoint(
+    payload: PurchaseVerifyIn,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    try:
+        service = get_service()
+        req = service.purchases().subscriptions().get(
+            packageName=PACKAGE_NAME,
+            subscriptionId=payload.product_id,
+            token=payload.purchase_token,
+        )
+        res = req.execute()
+   except HttpError as e:
+        code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
+        msg = e.reason if hasattr(e, "reason") else str(e)
+        if code in (400, 404, 410):
+            raise HTTPException(status_code=400, detail=f"Invalid purchase token/product ({code}): {msg}")
+        raise HTTPException(status_code=502, detail=f"Google API error ({code}): {msg}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Google API error: {e}")
+
+    expiry_ms = int(res.get("expiryTimeMillis", "0"))
+    if not expiry_ms:
+        raise HTTPException(status_code=400, detail="Invalid expiryTimeMillis from Google API")
+
+    expires_at = _to_dt_utc(expiry_ms)
+    auto_renewing = bool(res.get("autoRenewing", True))
+    order_id = res.get("orderId")
+  status = _derive_status(res)
+
+    crud.deactivate_active_for_user(db, user_id)
+    crud.insert_active_subscription(
+        db=db,
+        user_id=user_id,
+        product_id=payload.product_id,
+        purchase_token=payload.purchase_token,
+        order_id=order_id,
+        expires_at=expires_at,
+        auto_renewing=auto_renewing,
+        status=status,
+    )
+    sub.last_verified_at = func.now()
+    db.commit()
+
+    return SubscriptionStatusOut(
+        active=(status == "ACTIVE"),
+        product_id=payload.product_id,
+        expires_at=expires_at,
+        status=status,
+        auto_renewing=auto_renewing,
+    )
+
+
+@app.get("/billing/status", response_model=SubscriptionStatusOut)
+def get_subscription_status(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    
+    sub = crud.get_active_subscription(db, user_id)
+    if not sub:
+        return SubscriptionStatusOut(active=False)
+
+    return SubscriptionStatusOut(
+        active=(sub.status == "ACTIVE"),
+        product_id=sub.product_id,
+        expires_at=sub.expires_at,
+        status=sub.status,
+        auto_renewing=sub.auto_renewing,
+    )

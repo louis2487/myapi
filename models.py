@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 from pydantic import BaseModel
-
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 Base = declarative_base()
 
 class RuntimeRecord(Base):
@@ -20,6 +21,24 @@ class User(Base):
     username = Column(String(50), nullable=False, unique=True, index=True) 
     email = Column(String(255), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
+    
+    subscriptions = relationship("Subscription", back_populates="user")
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Text, nullable=False)
+    purchase_token = Column(Text, nullable=False)
+    order_id = Column(Text, nullable=True)
+    subscribed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    auto_renewing = Column(Boolean, nullable=False, default=True)
+    status = Column(Text, nullable=False)  
+    last_verified_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    active = Column(Boolean, nullable=False, default=False)
+
+    user = relationship("User", back_populates="subscriptions")
 
 class Recode(Base):
     __tablename__ = "recode"
@@ -38,3 +57,13 @@ class RangeSummaryOut(BaseModel):
     on_count: int
     runtime_seconds: int
 
+class PurchaseVerifyIn(BaseModel):
+    product_id: str
+    purchase_token: str
+
+class SubscriptionStatusOut(BaseModel):
+    active: bool
+    product_id: str | None = None
+    expires_at: datetime | None = None
+    status: str | None = None
+    auto_renewing: bool | None = None
