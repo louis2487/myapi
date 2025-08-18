@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from datetime import datetime
 from .models import Subscription
-
+from sqlalchemy import func 
 def deactivate_active_for_user(db: Session, user_id: int):
     db.query(Subscription).filter(
         Subscription.user_id == user_id,
@@ -22,6 +22,7 @@ def insert_active_subscription(
         status=status,
         active=True
     )
+    sub.last_verified_at = func.now()
     db.add(sub)
     return sub
 

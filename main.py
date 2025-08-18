@@ -290,7 +290,7 @@ def verify_subscription_endpoint(
     expires_at = _to_dt_utc(expiry_ms)
     auto_renewing = bool(res.get("autoRenewing", True))
     order_id = res.get("orderId")
-  status = _derive_status(res)
+    status = _derive_status(res)
 
     crud.deactivate_active_for_user(db, user_id)
     crud.insert_active_subscription(
@@ -303,7 +303,6 @@ def verify_subscription_endpoint(
         auto_renewing=auto_renewing,
         status=status,
     )
-    sub.last_verified_at = func.now()
     db.commit()
 
     return SubscriptionStatusOut(
