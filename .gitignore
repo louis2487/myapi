@@ -1,1 +1,6 @@
 venv
+smartgauge-service-key.json
+*.jks
+*.keystore
+*.pem
+*.p12
