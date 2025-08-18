@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from datetime import datetime
-from .models import Subscription
+from models import Subscription
 from sqlalchemy import func 
 def deactivate_active_for_user(db: Session, user_id: int):
     db.query(Subscription).filter(
