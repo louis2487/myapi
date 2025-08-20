@@ -31,11 +31,11 @@ class Subscription(Base):
     product_id = Column(Text, nullable=False)
     purchase_token = Column(Text, nullable=False)
     order_id = Column(Text, nullable=True)
-    subscribed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    subscribed_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     auto_renewing = Column(Boolean, nullable=False, default=True)
     status = Column(Text, nullable=False)  
-    last_verified_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_verified_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now, onupdate=datatime.now)
     active = Column(Boolean, nullable=False, default=False)
 
     user = relationship("User", back_populates="subscriptions")

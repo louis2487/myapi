@@ -19,6 +19,7 @@ def insert_active_subscription(
         purchase_token=purchase_token,
         order_id=order_id,
         expires_at=expires_at,
+        last_verified_at=datetime.now,
         auto_renewing=auto_renewing,
         status=status,
         active=True
