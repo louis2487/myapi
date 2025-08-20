@@ -207,9 +207,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         product_id = sub.get("subscriptionId")
 
         if not purchase_token or not product_id:
-           
             return {"ok": True, "skip": True}
-
      
         service = get_service()
         res = service.purchases().subscriptions().get(
@@ -217,6 +215,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
             subscriptionId="smartgauge_yearly",
             token=purchase_token,
         ).execute()
+        _ack_if_needed(service, payload.product_id, payload.purchase_token, developer_payload=f"user:{user_id}")
 
         expiry_ms = int(res.get("expiryTimeMillis", "0"))
         if not expiry_ms:
@@ -266,6 +265,24 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=200, detail=str(e))
         return {"ok": False, "error": str(e)}
+
+
+
+        
+def _ack_if_needed(service, product_id: str, purchase_token: str, developer_payload: str = "") -> None:
+    try:
+        service.purchases().subscriptions().acknowledge(
+            packageName=PACKAGE_NAME,
+            subscriptionId=product_id,
+            token=purchase_token,
+            body={"developerPayload": developer_payload or ""}
+        ).execute()
+    except HttpError as e:
+        code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
+        if code in (400, 409):
+            return
+        raise
+
 
 def get_current_user_id(
     creds: HTTPAuthorizationCredentials = Depends(bearer),
@@ -327,18 +344,20 @@ def verify_subscription_endpoint(
 ):
     try:
         service = get_service()
-        req = service.purchases().subscriptions().get(
+        res = service.purchases().subscriptions().get(
             packageName="kr.co.smartgauge",
             subscriptionId="smartgauge_yearly",
             token=payload.purchase_token,
-        )
-        res = req.execute()
+        ).execute()
+        _ack_if_needed(service, payload.product_id, payload.purchase_token, developer_payload=f"user:{user_id}")
+
     except HttpError as e:
         code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
         msg = e.reason if hasattr(e, "reason") else str(e)
         if code in (400, 404, 410):
             raise HTTPException(status_code=400, detail=f"Invalid purchase token/product ({code}): {msg}")
         raise HTTPException(status_code=502, detail=f"Google API error ({code}): {msg}")
+
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Google API error: {e}")
 
