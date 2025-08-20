@@ -58,6 +58,7 @@ class RangeSummaryOut(BaseModel):
     runtime_seconds: int
 
 class PurchaseVerifyIn(BaseModel):
+    user_id: int 
     product_id: str
     purchase_token: str
 

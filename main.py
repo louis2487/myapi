@@ -201,21 +201,21 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         data_b64 = msg["data"]
         payload = json.loads(base64.b64decode(data_b64).decode("utf-8"))
 
-     
         sub = payload.get("subscriptionNotification") or {}
         purchase_token = sub.get("purchaseToken")
         product_id = sub.get("subscriptionId")
 
         if not purchase_token or not product_id:
             return {"ok": True, "skip": True}
-     
+
         service = get_service()
         res = service.purchases().subscriptions().get(
             packageName="kr.co.smartgauge",
-            subscriptionId="smartgauge_yearly",
+            subscriptionId=product_id,
             token=purchase_token,
         ).execute()
-        _ack_if_needed(service, payload.product_id, payload.purchase_token, developer_payload=f"user:{user_id}")
+
+        _ack_if_needed(service, product_id, purchase_token, developer_payload="rtdn")
 
         expiry_ms = int(res.get("expiryTimeMillis", "0"))
         if not expiry_ms:
@@ -224,15 +224,14 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         expires_at = _to_dt_utc(expiry_ms)
         auto_renewing = bool(res.get("autoRenewing", True))
         order_id = res.get("orderId")
-        status = _derive_status(expiry_ms)  
+        status = _derive_status(res)
 
-    
         row = crud.get_subscription_by_token(db, purchase_token)
         if row:
             crud.update_subscription_fields(
                 db,
                 row,
-                product_id="smartgauge_yearly",
+                product_id=product_id,
                 order_id=order_id,
                 expires_at=expires_at,
                 auto_renewing=auto_renewing,
@@ -250,7 +249,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
                 crud.insert_active_subscription(
                     db=db,
                     user_id=prev.user_id,
-                    product_id="smartgauge_yearly",
+                    product_id=product_id,
                     purchase_token=purchase_token,
                     order_id=order_id,
                     expires_at=expires_at,
@@ -263,16 +262,14 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "unknown_token": True}
 
     except Exception as e:
-        raise HTTPException(status_code=200, detail=str(e))
         return {"ok": False, "error": str(e)}
-
 
 
         
 def _ack_if_needed(service, product_id: str, purchase_token: str, developer_payload: str = "") -> None:
     try:
         service.purchases().subscriptions().acknowledge(
-            packageName=PACKAGE_NAME,
+            packageName="kr.co.smartgauge",
             subscriptionId=product_id,
             token=purchase_token,
             body={"developerPayload": developer_payload or ""}
@@ -282,30 +279,6 @@ def _ack_if_needed(service, product_id: str, purchase_token: str, developer_payl
         if code in (400, 409):
             return
         raise
-
-
-def get_current_user_id(
-    creds: HTTPAuthorizationCredentials = Depends(bearer),
-    db: Session = Depends(get_db),
-) -> int:
-    token = creds.credentials
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    uid = payload.get("sub") or payload.get("user_id")
-    try:
-        uid = int(uid)
-    except:
-        raise HTTPException(status_code=401, detail="Invalid user id")
-
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return uid
 
 
 def _to_dt_utc(ms: int) -> datetime:
@@ -336,12 +309,18 @@ def _derive_status(res: dict) -> str:
         return "PRICE_CHANGE_PENDING"
     return "ACTIVE"
 
+
 @app.post("/billing/verify", response_model=SubscriptionStatusOut)
 def verify_subscription_endpoint(
-    payload: PurchaseVerifyIn,
+    payload: PurchaseVerifyIn,  
     db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
 ):
+
+    user = db.query(User).filter(User.username == payload.username).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid username")
+    user_id = user.id
+
     try:
         service = get_service()
         res = service.purchases().subscriptions().get(
@@ -349,7 +328,14 @@ def verify_subscription_endpoint(
             subscriptionId="smartgauge_yearly",
             token=payload.purchase_token,
         ).execute()
-        _ack_if_needed(service, payload.product_id, payload.purchase_token, developer_payload=f"user:{user_id}")
+
+      
+        _ack_if_needed(
+            service=service,
+            product_id=payload.product_id,
+            purchase_token=payload.purchase_token,
+            developer_payload=f"user:{user.username}"  
+        )
 
     except HttpError as e:
         code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
@@ -392,12 +378,17 @@ def verify_subscription_endpoint(
     )
 
 
+
 @app.get("/billing/status", response_model=SubscriptionStatusOut)
 def get_subscription_status(
+    username: str,
     db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
 ):
-    
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid username")
+    user_id = user.id
+
     sub = crud.get_active_subscription(db, user_id)
     if not sub:
         return SubscriptionStatusOut(active=False)
