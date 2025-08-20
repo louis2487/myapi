@@ -35,7 +35,7 @@ class Subscription(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     auto_renewing = Column(Boolean, nullable=False, default=True)
     status = Column(Text, nullable=False)  
-    last_verified_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now, onupdate=datatime.now)
+    last_verified_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now, onupdate=datetime.now)
     active = Column(Boolean, nullable=False, default=False)
 
     user = relationship("User", back_populates="subscriptions")
