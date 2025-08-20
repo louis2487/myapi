@@ -264,8 +264,8 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "unknown_token": True}
 
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+        raise HTTPException(status_code=200, detail=str(e))
+        return {"ok": False, "error": str(e)}
 
 def get_current_user_id(
     creds: HTTPAuthorizationCredentials = Depends(bearer),
