@@ -213,8 +213,8 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
      
         service = get_service()
         res = service.purchases().subscriptions().get(
-            packageName=PACKAGE_NAME,
-            subscriptionId=product_id,
+            packageName="kr.co.smartgauge",
+            subscriptionId="smartgauge_yearly",
             token=purchase_token,
         ).execute()
 
@@ -233,7 +233,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
             crud.update_subscription_fields(
                 db,
                 row,
-                product_id=product_id,
+                product_id="smartgauge_yearly",
                 order_id=order_id,
                 expires_at=expires_at,
                 auto_renewing=auto_renewing,
@@ -251,7 +251,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
                 crud.insert_active_subscription(
                     db=db,
                     user_id=prev.user_id,
-                    product_id=product_id,
+                    product_id="smartgauge_yearly",
                     purchase_token=purchase_token,
                     order_id=order_id,
                     expires_at=expires_at,
@@ -328,8 +328,8 @@ def verify_subscription_endpoint(
     try:
         service = get_service()
         req = service.purchases().subscriptions().get(
-            packageName=PACKAGE_NAME,
-            subscriptionId=payload.product_id,
+            packageName="kr.co.smartgauge",
+            subscriptionId="smartgauge_yearly",
             token=payload.purchase_token,
         )
         res = req.execute()
@@ -355,7 +355,7 @@ def verify_subscription_endpoint(
     crud.insert_active_subscription(
         db=db,
         user_id=user_id,
-        product_id=payload.product_id,
+        product_id="smartgauge_yearly",
         purchase_token=payload.purchase_token,
         order_id=order_id,
         expires_at=expires_at,
