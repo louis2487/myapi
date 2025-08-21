@@ -341,6 +341,9 @@ def verify_subscription_endpoint(
         code = getattr(e, "status_code", None) or (e.resp.status if hasattr(e, "resp") else None)
         msg = e.reason if hasattr(e, "reason") else str(e)
         print(f"[Google API Error] code={code}, msg={msg}") 
+        if code in (400, 404, 410):
+            raise HTTPException(status_code=400, detail=f"Invalid purchase token/product ({code}): {msg}")
+        raise HTTPException(status_code=502, detail=f"Google API error ({code}): {msg}")
 
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Google API error: {e}")
