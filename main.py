@@ -389,11 +389,13 @@ def get_subscription_status(
     if not user:
         raise HTTPException(status_code=400, detail="Invalid username")
     user_id = user.id
-
+     
     sub = crud.get_active_subscription(db, user_id)
     if not sub:
         return SubscriptionStatusOut(active=False)
 
+    db.refresh(sub)
+    
     return SubscriptionStatusOut(
         active=(sub.status == "ACTIVE"),
         product_id=sub.product_id,

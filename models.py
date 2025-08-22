@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 Base = declarative_base()
@@ -68,3 +68,5 @@ class SubscriptionStatusOut(BaseModel):
     expires_at: datetime | None = None
     status: str | None = None
     auto_renewing: bool | None = None
+
+    model_config = ConfigDict(from_attributes=True)
