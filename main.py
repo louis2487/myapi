@@ -225,6 +225,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
         auto_renewing = bool(res.get("autoRenewing", True))
         order_id = res.get("orderId")
         status = _derive_status(res)
+        active = (status in ["ACTIVE", "CANCELED"])
 
         row = crud.get_subscription_by_token(db, purchase_token)
         if row:
@@ -236,7 +237,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
                 expires_at=expires_at,
                 auto_renewing=auto_renewing,
                 status=status,
-                active=(status == "ACTIVE"),
+                active=active,
             )
             db.commit()
             return {"ok": True, "updated": True}
@@ -255,6 +256,7 @@ async def play_rtdn(request: Request, db: Session = Depends(get_db)):
                     expires_at=expires_at,
                     auto_renewing=auto_renewing,
                     status=status,
+                    active=active,
                 )
                 db.commit()
                 return {"ok": True, "migrated_from_linked": True}
@@ -356,6 +358,7 @@ def verify_subscription_endpoint(
     auto_renewing = bool(res.get("autoRenewing", True))
     order_id = res.get("orderId")
     status = _derive_status(res)
+    active = (status in ["ACTIVE", "CANCELED"])
 
     crud.deactivate_active_for_user(db, user_id)
     crud.insert_active_subscription(
@@ -367,11 +370,12 @@ def verify_subscription_endpoint(
         expires_at=expires_at,
         auto_renewing=auto_renewing,
         status=status,
+        active=active
     )
     db.commit()
 
     return SubscriptionStatusOut(
-        active=(status == "ACTIVE"),
+        active=active,
         product_id=payload.product_id,
         expires_at=expires_at,
         status=status,
@@ -397,7 +401,7 @@ def get_subscription_status(
     db.refresh(sub)
     
     return SubscriptionStatusOut(
-        active=(sub.status == "ACTIVE"),
+        active=sub.active,
         product_id=sub.product_id,
         expires_at=sub.expires_at,
         status=sub.status,

@@ -11,7 +11,7 @@ def deactivate_active_for_user(db: Session, user_id: int):
 
 def insert_active_subscription(
     db: Session, user_id: int, product_id: str, purchase_token: str,
-    order_id: str | None, expires_at: datetime, auto_renewing: bool, status: str
+    order_id: str | None, expires_at: datetime, auto_renewing: bool, status: str, active: str
 ):
     sub = Subscription(
         user_id=user_id,
@@ -22,7 +22,7 @@ def insert_active_subscription(
         last_verified_at=datetime.now,
         auto_renewing=auto_renewing,
         status=status,
-        active=True
+        active=active
     )
     sub.last_verified_at = func.now()
     db.add(sub)
