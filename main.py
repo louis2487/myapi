@@ -360,18 +360,30 @@ def verify_subscription_endpoint(
     status = _derive_status(res)
     active = (status in ["ACTIVE", "CANCELED"])
 
-    crud.deactivate_active_for_user(db, user_id)
-    crud.insert_active_subscription(
-        db=db,
-        user_id=user_id,
-        product_id="smartgauge_yearly",
-        purchase_token=payload.purchase_token,
-        order_id=order_id,
-        expires_at=expires_at,
-        auto_renewing=auto_renewing,
-        status=status,
-        active=active
-    )
+    existing = crud.get_subscription_by_token(db, payload.purchase_token)
+    if existing:
+        crud.update_subscription_fields(
+            db,
+            existing,
+            product_id=payload.product_id,
+            order_id=order_id,
+            expires_at=expires_at,
+            auto_renewing=auto_renewing,
+            status=status,
+            active=active,
+        )
+    else:
+        crud.insert_active_subscription(
+            db=db,
+            user_id=user_id,
+            product_id="smartgauge_yearly",
+            purchase_token=payload.purchase_token,
+            order_id=order_id,
+            expires_at=expires_at,
+            auto_renewing=auto_renewing,
+            status=status,
+            active=active
+        )
     db.commit()
 
     return SubscriptionStatusOut(
