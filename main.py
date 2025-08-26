@@ -15,6 +15,7 @@ import crud
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import base64, json
 from googleapiclient.errors import HttpError
+from typing import Optional, List
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
