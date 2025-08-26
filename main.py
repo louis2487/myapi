@@ -540,6 +540,7 @@ def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depe
         PostOut(
             id=p.id,
             author=PostAuthor(id=p.author.id, username=p.author.username),
+            title=p.title,
             content=p.content,
             image_url=p.image_url,
             created_at=p.created_at,
@@ -558,6 +559,7 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
     return PostOut(
         id=p.id,
         author=PostAuthor(id=p.author.id, username=p.author.username),
+        title=p.title,
         content=p.content,
         image_url=p.image_url,
         created_at=p.created_at,
