@@ -70,3 +70,25 @@ class SubscriptionStatusOut(BaseModel):
     auto_renewing: bool | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+#---------------community-app-mvp-----------------------------------------------------------
+
+class Community_User(Base):
+    __tablename__ = "community_users"
+    
+    id   =  Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), nullable=False, unique=True, index=True) 
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+
+class Community_Post(Base):
+    __tablename__ = "community_posts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("community_users.id"), index=True) 
+    content: Mapped[str] = mapped_column(Text)
+    image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")

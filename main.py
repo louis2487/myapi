@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post
 import hashlib
 import jwt 
 from sqlalchemy import func ,select 
@@ -151,6 +151,8 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
     return LoginResponse(user_id=user.id, token=token)
+
+
 
 
 @app.get("/recode/{username}/{date}", response_model=RecodeListOut)
@@ -418,4 +420,135 @@ def get_subscription_status(
         expires_at=sub.expires_at,
         status=sub.status,
         auto_renewing=sub.auto_renewing,
+    )
+
+#--------community-app-mvp-------------------------------------------------------------------------------
+def get_current_community_user(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        uid = int(payload.get("sub"))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    user = db.query(Community_User).filter(Community_User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+@app.post("/community/signup")
+def community_signup(req: SignupRequest, db: Session = Depends(get_db)):
+
+    if db.query(Community_User).filter(Community_User.username == req.username).first():
+        raise HTTPException(400,  "Username already taken")
+
+    pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+
+    user = Community_User(
+        username      = req.username,
+        email         = req.email,
+        password_hash = pw_hash
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {"status":"ok", "user_id": user.id}
+
+
+@app.post("/community/login", response_model=LoginResponse)
+def community_login(req: LoginRequest, db: Session = Depends(get_db)):
+
+    user = db.query(Community_User).filter(Community_User.username == req.username).first()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
+    if user.password_hash != pw_hash:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+    return LoginResponse(user_id=user.id, token=token)
+
+
+class PostCreate(BaseModel):
+    content: str
+    image_url: Optional[str] = None
+
+class PostAuthor(BaseModel):
+    id: int
+    username: str
+
+class PostOut(BaseModel):
+    id: int
+    author: PostAuthor
+    content: str
+    image_url: Optional[str] = None
+    created_at: datetime
+
+class PostsOut(BaseModel):
+    items: List[PostOut]
+    next_cursor: Optional[str] = None  
+
+@app.post("/community/posts", response_model=PostOut)
+def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
+    post = Community_Post(
+        user_id=user.id,
+        content=body.content,
+        image_url=body.image_url,
+    )
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    return PostOut(
+        id=post.id,
+        author=PostAuthor(id=user.id, username=user.username),
+        content=post.content,
+        image_url=post.image_url,
+        created_at=post.created_at,
+    )
+
+@app.get("/community/posts", response_model=PostsOut)
+def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depends(get_db)):
+    q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
+    if cursor:
+        try:
+            cur_dt = datetime.fromisoformat(cursor)
+            q = q.filter(Community_Post.created_at < cur_dt)
+        except Exception:
+            pass
+    rows = q.limit(limit).all()
+    items = [
+        PostOut(
+            id=p.id,
+            author=PostAuthor(id=p.author.id, username=p.author.username),
+            content=p.content,
+            image_url=p.image_url,
+            created_at=p.created_at,
+        )
+        for p in rows
+    ]
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return PostsOut(items=items, next_cursor=next_cursor)
+
+
+@app.get("/community/posts/{post_id}", response_model=PostOut)
+def get_post(post_id: int, db: Session = Depends(get_db)):
+    p = db.query(Community_Post).filter(Community_Post.id == post_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return PostOut(
+        id=p.id,
+        author=PostAuthor(id=p.author.id, username=p.author.username),
+        content=p.content,
+        image_url=p.image_url,
+        created_at=p.created_at,
     )
