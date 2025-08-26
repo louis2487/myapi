@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 Base = declarative_base()
 
 class RuntimeRecord(Base):
@@ -84,11 +85,11 @@ class Community_User(Base):
 class Community_Post(Base):
     __tablename__ = "community_posts"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("community_users.id"), index=True) 
-    content: Mapped[str] = mapped_column(Text)
-    image_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("community_users.id"), index=True) 
+    content = Column(Text)
+    image_url = Column(String(512), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
