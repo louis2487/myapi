@@ -16,6 +16,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import base64, json
 from googleapiclient.errors import HttpError
 from typing import Optional, List
+import uuid
+from fastapi.staticfiles import StaticFiles
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
@@ -498,6 +500,13 @@ class PostsOut(BaseModel):
     items: List[PostOut]
     next_cursor: Optional[str] = None  
 
+    UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+class UploadBase64Request(BaseModel):
+    filename: str
+    base64: str
+
 @app.post("/community/posts", response_model=PostOut)
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
@@ -552,3 +561,20 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         image_url=p.image_url,
         created_at=p.created_at,
     )
+
+
+@app.post("/upload/base64")
+def upload_base64(payload: UploadBase64Request):
+  
+    image_bytes = base64.b64decode(payload.base64)
+
+    save_path = os.path.join(UPLOAD_DIR, payload.filename or f"{uuid.uuid4()}.jpg")
+   
+    with open(save_path, "wb") as f:
+        f.write(image_bytes)
+
+    url = f"https://api.smartgauge.co.kr/static/{os.path.basename(save_path)}"
+
+    return {"url": url}
+
+app.mount("/static", StaticFiles(directory="uploads"), name="static")
