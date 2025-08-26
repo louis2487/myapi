@@ -500,9 +500,6 @@ class PostsOut(BaseModel):
     items: List[PostOut]
     next_cursor: Optional[str] = None  
 
-    UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 class UploadBase64Request(BaseModel):
     filename: str
     base64: str
@@ -562,6 +559,8 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         created_at=p.created_at,
     )
 
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.post("/upload/base64")
 def upload_base64(payload: UploadBase64Request):
