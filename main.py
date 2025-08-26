@@ -482,6 +482,7 @@ def community_login(req: LoginRequest, db: Session = Depends(get_db)):
 
 
 class PostCreate(BaseModel):
+    title: str
     content: str
     image_url: Optional[str] = None
 
@@ -492,6 +493,7 @@ class PostAuthor(BaseModel):
 class PostOut(BaseModel):
     id: int
     author: PostAuthor
+    title: str
     content: str
     image_url: Optional[str] = None
     created_at: datetime
@@ -508,6 +510,7 @@ class UploadBase64Request(BaseModel):
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
         user_id=user.id,
+         title=body.title,
         content=body.content,
         image_url=body.image_url,
     )
@@ -517,6 +520,7 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
     return PostOut(
         id=post.id,
         author=PostAuthor(id=user.id, username=user.username),
+        title=post.title,
         content=post.content,
         image_url=post.image_url,
         created_at=post.created_at,
@@ -566,14 +570,13 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def upload_base64(payload: UploadBase64Request):
   
     image_bytes = base64.b64decode(payload.base64)
-
     save_path = os.path.join(UPLOAD_DIR, payload.filename or f"{uuid.uuid4()}.jpg")
    
     with open(save_path, "wb") as f:
         f.write(image_bytes)
 
     url = f"https://api.smartgauge.co.kr/static/{os.path.basename(save_path)}"
-
     return {"url": url}
+
 
 app.mount("/static", StaticFiles(directory="uploads"), name="static")

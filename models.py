@@ -87,6 +87,7 @@ class Community_Post(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("community_users.id"), index=True) 
+    title = Column(String, nullable=False)
     content = Column(Text)
     image_url = Column(String(512), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
