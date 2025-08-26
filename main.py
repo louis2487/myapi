@@ -510,7 +510,7 @@ class UploadBase64Request(BaseModel):
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
         user_id=user.id,
-         title=body.title,
+        title=body.title,
         content=body.content,
         image_url=body.image_url,
     )
