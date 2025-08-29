@@ -18,6 +18,7 @@ from googleapiclient.errors import HttpError
 from typing import Optional, List
 import uuid
 from fastapi.staticfiles import StaticFiles
+from models import CommunityComment as C
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
@@ -506,6 +507,22 @@ class UploadBase64Request(BaseModel):
     filename: str
     base64: str
 
+#--------------------Comments update-----------------------
+class CommentCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+class CommentOut(BaseModel):
+    id: int
+    post_id: int
+    user_id: int
+    content: str
+    created_at: datetime
+    class Config: from_attributes = True
+
+class CommentListOut(BaseModel):
+    items: list[CommentOut]
+    next_cursor: Optional[str] = None
+#---------------------------------------------------------------
 @app.post("/community/posts", response_model=PostOut)
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
@@ -582,3 +599,37 @@ def upload_base64(payload: UploadBase64Request):
 
 
 app.mount("/static", StaticFiles(directory="uploads"), name="static")
+
+
+@app.post("/community/posts/{post_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
+def create_comment(
+    post_id: int,
+    payload: CommentCreate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_community_user),
+):
+    comment = C(post_id=post_id, user_id=user.id, content=payload.content)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.get("/community/posts/{post_id}/comments", response_model=CommentListOut)
+def list_comments(
+    post_id: int,
+    cursor: Optional[str] = Query(None, description="ISO8601 created_at 커서"),
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    q = db.query(C).filter(C.post_id == post_id)
+    if cursor:
+        try:
+            dt = datetime.fromisoformat(cursor)
+            q = q.filter(C.created_at < dt)
+        except Exception:
+            pass
+    rows = q.order_by(C.created_at.desc(), C.id.desc()).limit(limit + 1).all()
+    items = rows[:limit]
+    next_cur = items[-1].created_at.isoformat() if len(rows) > limit else None
+    return CommentListOut(items=items, next_cursor=next_cur)

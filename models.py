@@ -94,3 +94,14 @@ class Community_Post(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
+
+    class CommunityComment(Base):
+    __tablename__ = "community_comments"
+    id = Column(BigInteger, primary_key=True, index=True)
+    post_id = Column(BigInteger, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey("community_users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    post = relationship("CommunityPost", back_populates="comments", lazy="joined")
+    user = relationship("CommunityUser", lazy="joined")
