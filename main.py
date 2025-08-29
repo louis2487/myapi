@@ -623,7 +623,7 @@ def list_comments(
 ):
     q = db.query(Community_Comment).filter(Community_Comment.post_id == post_id)
     if cursor:
-        try
+        try:
             dt = datetime.fromisoformat(cursor)
             q = q.filter(Community_Comment.created_at < dt)
         except Exception:
