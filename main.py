@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Header
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, Query
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
