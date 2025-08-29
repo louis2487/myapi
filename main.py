@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment
 import hashlib
 import jwt 
 from sqlalchemy import func ,select 
@@ -18,7 +18,6 @@ from googleapiclient.errors import HttpError
 from typing import Optional, List
 import uuid
 from fastapi.staticfiles import StaticFiles
-from models import CommunityComment as C
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
@@ -608,7 +607,7 @@ def create_comment(
     db: Session = Depends(get_db),
     user=Depends(get_current_community_user),
 ):
-    comment = C(post_id=post_id, user_id=user.id, content=payload.content)
+    comment = Community_Comment(post_id=post_id, user_id=user.id, content=payload.content)
     db.add(comment)
     db.commit()
     db.refresh(comment)
@@ -622,14 +621,14 @@ def list_comments(
     limit: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db),
 ):
-    q = db.query(C).filter(C.post_id == post_id)
+    q = db.query(Community_Comment).filter(Community_Comment.post_id == post_id)
     if cursor:
-        try:
+        try
             dt = datetime.fromisoformat(cursor)
-            q = q.filter(C.created_at < dt)
+            q = q.filter(Community_Comment.created_at < dt)
         except Exception:
             pass
-    rows = q.order_by(C.created_at.desc(), C.id.desc()).limit(limit + 1).all()
+    rows = q.order_by(Community_Comment.created_at.desc(), Community_Comment.id.desc()).limit(limit + 1).all()
     items = rows[:limit]
     next_cur = items[-1].created_at.isoformat() if len(rows) > limit else None
     return CommentListOut(items=items, next_cursor=next_cur)

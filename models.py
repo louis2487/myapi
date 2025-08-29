@@ -95,7 +95,7 @@ class Community_Post(Base):
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
 
-class CommunityComment(Base):
+class Community_Comment(Base):
     __tablename__ = "community_comments"
     id = Column(BigInteger, primary_key=True, index=True)
     post_id = Column(BigInteger, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
