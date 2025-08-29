@@ -103,5 +103,5 @@ class Community_Comment(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    post = relationship("CommunityPost", back_populates="comments", lazy="joined")
-    user = relationship("CommunityUser", lazy="joined")
+    post = relationship("Community_Post", back_populates="comments", lazy="joined")
+    user = relationship("Community_User", lazy="joined")
