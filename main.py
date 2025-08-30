@@ -19,6 +19,7 @@ from typing import Optional, List
 import uuid
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+import re
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 bearer = HTTPBearer(auto_error=True)
