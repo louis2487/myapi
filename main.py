@@ -582,25 +582,45 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         created_at=p.created_at,
     )
 
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")) 
+STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")).resolve()
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
+print("### STATIC_DIR =", STATIC_DIR)
+print("### STATIC_DIR exists?", STATIC_DIR.exists())
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+def _strip_data_url(b64: str) -> str:
+    return re.sub(r"^data:.*;base64,", "", b64)
+
+def _ensure_ext(path: Path, raw_bytes: bytes) -> Path:
+    if path.suffix:
+        return path
+    kind = imghdr.what(None, h=raw_bytes)  # 'jpeg' | 'png' ...
+    ext = {"jpeg": ".jpg", "png": ".png", "gif": ".gif"}.get(kind, ".jpg")
+    return path.with_suffix(ext)
 
 @app.post("/upload/base64")
 def upload_base64(payload: UploadBase64Request):
-  
-    image_bytes = base64.b64decode(payload.base64)
-    filename = payload.filename or f"{uuid.uuid4()}.jpg"
-    save_path =  STATIC_DIR / filename
-   
+    if not payload.base64:
+        raise HTTPException(400, "base64 required")
+
+    raw_b64 = _strip_data_url(payload.base64)
+    try:
+        image_bytes = base64.b64decode(raw_b64)
+    except Exception:
+        raise HTTPException(400, "invalid base64")
+
+    name = (payload.filename or f"{uuid.uuid4()}.jpg").strip()
+    name = name.replace("\\", "/").split("/")[-1]  
+ 
+    save_path = _ensure_ext(STATIC_DIR / name, image_bytes)
+
+    print("SAVE TO:", save_path)
     with open(save_path, "wb") as f:
         f.write(image_bytes)
 
-    return {"url": f"https://api.smartgauge.co.kr/static/{filename}"}
-
-
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    public_url = f"https://api.smartgauge.co.kr/static/{save_path.name}"
+    return {"url": public_url}
 
 
 @app.post("/community/posts/{post_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
