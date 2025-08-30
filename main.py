@@ -18,7 +18,7 @@ from googleapiclient.errors import HttpError
 from typing import Optional, List
 import uuid
 from fastapi.staticfiles import StaticFiles
-
+from pathlib import Path
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 bearer = HTTPBearer(auto_error=True)
@@ -514,6 +514,7 @@ class CommentOut(BaseModel):
     id: int
     post_id: int
     user_id: int
+    username: str
     content: str
     created_at: datetime
     class Config: from_attributes = True
@@ -581,23 +582,25 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         created_at=p.created_at,
     )
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")) 
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 @app.post("/upload/base64")
 def upload_base64(payload: UploadBase64Request):
   
     image_bytes = base64.b64decode(payload.base64)
-    save_path = os.path.join(UPLOAD_DIR, payload.filename or f"{uuid.uuid4()}.jpg")
+    filename = payload.filename or f"{uuid.uuid4()}.jpg"
+    save_path =  STATIC_DIR / filename
    
     with open(save_path, "wb") as f:
         f.write(image_bytes)
 
-    url = f"https://api.smartgauge.co.kr/static/{os.path.basename(save_path)}"
-    return {"url": url}
+    return {"url": f"https://api.smartgauge.co.kr/static/{filename}"}
 
 
-app.mount("/static", StaticFiles(directory="uploads"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.post("/community/posts/{post_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
@@ -607,7 +610,12 @@ def create_comment(
     db: Session = Depends(get_db),
     user=Depends(get_current_community_user),
 ):
-    comment = Community_Comment(post_id=post_id, user_id=user.id, content=payload.content)
+    comment = Community_Comment(
+        post_id=post_id, 
+        user_id=user.id, 
+        username=user.username,
+        content=payload.content    
+    )
     db.add(comment)
     db.commit()
     db.refresh(comment)

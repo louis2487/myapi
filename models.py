@@ -99,6 +99,7 @@ class Community_Comment(Base):
     id = Column(BigInteger, primary_key=True, index=True)  # id는 bigint 유지해도 무방
     post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("community_users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    username = Column(String(50), nullable=False, index=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
