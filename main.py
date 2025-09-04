@@ -555,7 +555,7 @@ class CommentListOut(BaseModel):
     next_cursor: Optional[str] = None
 #---------------------------------------------------------------
 
- @app.post("/community/posts", response_model=PostOut)
+@app.post("/community/posts", response_model=PostOut)
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
         user_id=user.id,
