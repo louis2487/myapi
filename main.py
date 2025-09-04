@@ -486,6 +486,21 @@ class PostCreate(BaseModel):
     title: str
     content: str
     image_url: Optional[str] = None
+    contract_fee: Optional[str] = None
+    workplace_address: Optional[str] = None
+    workplace_map_url: Optional[str] = None
+    business_address: Optional[str] = None
+    business_map_url: Optional[str] = None
+    job_industry: Optional[str] = None
+    job_category: Optional[str] = None
+    pay_support: Optional[bool] = None
+    meal_support: Optional[bool] = None
+    house_support: Optional[bool] = None
+    company_developer: Optional[str] = None
+    company_constructor: Optional[str] = None
+    company_trustee: Optional[str] = None
+    company_agency: Optional[str] = None
+    agency_call: Optional[str] = None
 
 class PostAuthor(BaseModel):
     id: int
@@ -498,6 +513,21 @@ class PostOut(BaseModel):
     content: str
     image_url: Optional[str] = None
     created_at: datetime
+    contract_fee: Optional[str] = None
+    workplace_address: Optional[str] = None
+    workplace_map_url: Optional[str] = None
+    business_address: Optional[str] = None
+    business_map_url: Optional[str] = None
+    job_industry: Optional[str] = None
+    job_category: Optional[str] = None
+    pay_support: Optional[bool] = None
+    meal_support: Optional[bool] = None
+    house_support: Optional[bool] = None
+    company_developer: Optional[str] = None
+    company_constructor: Optional[str] = None
+    company_trustee: Optional[str] = None
+    company_agency: Optional[str] = None
+    agency_call: Optional[str] = None
 
 class PostsOut(BaseModel):
     items: List[PostOut]
@@ -524,13 +554,29 @@ class CommentListOut(BaseModel):
     items: list[CommentOut]
     next_cursor: Optional[str] = None
 #---------------------------------------------------------------
-@app.post("/community/posts", response_model=PostOut)
+
+ @app.post("/community/posts", response_model=PostOut)
 def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
     post = Community_Post(
         user_id=user.id,
         title=body.title,
         content=body.content,
         image_url=body.image_url,
+        contract_fee=body.contract_fee,
+        workplace_address=body.workplace_address,
+        workplace_map_url=body.workplace_map_url,
+        business_address=body.business_address,
+        business_map_url=body.business_map_url,
+        job_industry=body.job_industry,
+        job_category=body.job_category,
+        pay_support=body.pay_support,
+        meal_support=body.meal_support,
+        house_support=body.house_support,
+        company_developer=body.company_developer,
+        company_constructor=body.company_constructor,
+        company_trustee=body.company_trustee,
+        company_agency=body.company_agency,
+        agency_call=body.agency_call,
     )
     db.add(post)
     db.commit()
@@ -542,7 +588,23 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         content=post.content,
         image_url=post.image_url,
         created_at=post.created_at,
+        contract_fee=post.contract_fee,
+        workplace_address=post.workplace_address,
+        workplace_map_url=post.workplace_map_url,
+        business_address=post.business_address,
+        business_map_url=post.business_map_url,
+        job_industry=post.job_industry,
+        job_category=post.job_category,
+        pay_support=post.pay_support,
+        meal_support=post.meal_support,
+        house_support=post.house_support,
+        company_developer=post.company_developer,
+        company_constructor=post.company_constructor,
+        company_trustee=post.company_trustee,
+        company_agency=post.company_agency,
+        agency_call=post.agency_call,
     )
+
 
 @app.get("/community/posts", response_model=PostsOut)
 def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depends(get_db)):
@@ -554,6 +616,7 @@ def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depe
         except Exception:
             pass
     rows = q.limit(limit).all()
+
     items = [
         PostOut(
             id=p.id,
@@ -562,11 +625,27 @@ def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depe
             content=p.content,
             image_url=p.image_url,
             created_at=p.created_at,
+            contract_fee=p.contract_fee,
+            workplace_address=p.workplace_address,
+            workplace_map_url=p.workplace_map_url,
+            business_address=p.business_address,
+            business_map_url=p.business_map_url,
+            job_industry=p.job_industry,
+            job_category=p.job_category,
+            pay_support=p.pay_support,
+            meal_support=p.meal_support,
+            house_support=p.house_support,
+            company_developer=p.company_developer,
+            company_constructor=p.company_constructor,
+            company_trustee=p.company_trustee,
+            company_agency=p.company_agency,
+            agency_call=p.agency_call,
         )
         for p in rows
     ]
     next_cursor = rows[-1].created_at.isoformat() if rows else None
     return PostsOut(items=items, next_cursor=next_cursor)
+
 
 
 @app.get("/community/posts/{post_id}", response_model=PostOut)
@@ -581,6 +660,21 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         content=p.content,
         image_url=p.image_url,
         created_at=p.created_at,
+        contract_fee=p.contract_fee,
+        workplace_address=p.workplace_address,
+        workplace_map_url=p.workplace_map_url,
+        business_address=p.business_address,
+        business_map_url=p.business_map_url,
+        job_industry=p.job_industry,
+        job_category=p.job_category,
+        pay_support=p.pay_support,
+        meal_support=p.meal_support,
+        house_support=p.house_support,
+        company_developer=p.company_developer,
+        company_constructor=p.company_constructor,
+        company_trustee=p.company_trustee,
+        company_agency=p.company_agency,
+        agency_call=p.agency_call,
     )
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")).resolve()
