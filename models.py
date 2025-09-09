@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
+from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
 Base = declarative_base()
 
 class RuntimeRecord(Base):
