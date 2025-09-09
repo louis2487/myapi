@@ -92,7 +92,11 @@ class Community_Post(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     contract_fee = Column(String(255))               
     workplace_address = Column(String(255))          
-    workplace_map_url = Column(String(512))          
+    workplace_map_url = Column(String(512))   
+    workplace_lat= Column(DOUBLE_PRECISION, nullable=True)   
+    workplace_lng= Column(DOUBLE_PRECISION, nullable=True)   
+    business_lat= Column(DOUBLE_PRECISION, nullable=True)   
+    business_lng= Column(DOUBLE_PRECISION, nullable=True)          
     business_address = Column(String(255))           
     business_map_url = Column(String(512))            
     job_industry = Column(String(100))               
@@ -111,7 +115,7 @@ class Community_Post(Base):
 
 class Community_Comment(Base):
     __tablename__ = "community_comments"
-    id = Column(BigInteger, primary_key=True, index=True)  # id는 bigint 유지해도 무방
+    id = Column(BigInteger, primary_key=True, index=True)  
     post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("community_users.id", ondelete="RESTRICT"), nullable=False, index=True)
     username = Column(String(50), nullable=False, index=True)
