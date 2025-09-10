@@ -447,9 +447,11 @@ def get_current_community_user(
 class SignupRequest_C(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=6, max_length=255)
+    name: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
     position: str | None = Field(default=None, max_length=50)
     region: str | None = Field(default=None, max_length=100)
+   
 
 @app.post("/community/signup")
 def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
@@ -462,9 +464,10 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     user = Community_User(
         username      = req.username,
         password_hash = pw_hash,
+        name          = req.name,
         phone_number  = req.phone_number,
         position      = req.position,
-        region        = req.region,
+        region        = req.region,  
     )
     db.add(user)
     db.commit()
