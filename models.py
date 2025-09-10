@@ -80,7 +80,7 @@ class Community_User(Base):
     username = Column(String(50), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
     name          = Column(String(50),  nullable=True)
-    phone_number  = Column(String(20),  nullable=True, unique=True, index=True)  
+    phone_number  = Column(String(20),  nullable=True)  
     position      = Column(String(50),  nullable=True)   
     region        = Column(String(100), nullable=True) 
    
