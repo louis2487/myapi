@@ -445,8 +445,8 @@ def get_current_community_user(
     return user
 
 class SignupRequest_C(BaseModel):
-    username: str = Field(min_length=3, max_length=50)
-    password: str = Field(min_length=6, max_length=255)
+    username: str = Field(min_length=2, max_length=50)
+    password: str = Field(min_length=2, max_length=255)
     name: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
     position: str | None = Field(default=None, max_length=50)
