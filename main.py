@@ -444,8 +444,15 @@ def get_current_community_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
 
+class SignupRequest_C(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=6, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
+    position: str | None = Field(default=None, max_length=50)
+    region: str | None = Field(default=None, max_length=100)
+
 @app.post("/community/signup")
-def community_signup(req: SignupRequest, db: Session = Depends(get_db)):
+def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
 
     if db.query(Community_User).filter(Community_User.username == req.username).first():
         raise HTTPException(400,  "Username already taken")
@@ -454,8 +461,10 @@ def community_signup(req: SignupRequest, db: Session = Depends(get_db)):
 
     user = Community_User(
         username      = req.username,
-        email         = req.email,
-        password_hash = pw_hash
+        password_hash = pw_hash,
+        phone_number  = req.phone_number,
+        position      = req.position,
+        region        = req.region,
     )
     db.add(user)
     db.commit()

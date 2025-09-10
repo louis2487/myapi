@@ -78,8 +78,10 @@ class Community_User(Base):
     __tablename__ = "community_users"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), nullable=False, unique=True, index=True)
-    email = Column(String(255), nullable=False, unique=True, index=True)
     password_hash = Column(String(255), nullable=False)
+    phone_number  = Column(String(20),  nullable=True, unique=True, index=True)  
+    position      = Column(String(50),  nullable=True)   
+    region        = Column(String(100), nullable=True) 
 
 class Community_Post(Base):
     __tablename__ = "community_posts"
