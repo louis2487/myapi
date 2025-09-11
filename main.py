@@ -451,6 +451,7 @@ class SignupRequest_C(BaseModel):
     phone_number: str | None = Field(default=None, max_length=20)
     position: str | None = Field(default=None, max_length=50)
     region: str | None = Field(default=None, max_length=100)
+    signup_date: date | None = Field(default=None)
    
 
 @app.post("/community/signup")
@@ -468,6 +469,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         phone_number  = req.phone_number,
         position      = req.position,
         region        = req.region,  
+        signup_date   = req.signup_date,
     )
     db.add(user)
     db.commit()
@@ -494,6 +496,13 @@ def community_login(req: LoginRequest, db: Session = Depends(get_db)):
     return LoginResponse(user_id=user.id, token=token)
 
 
+def split_address(addr: str):
+    parts = addr.split()
+    province = parts[0] if len(parts) > 0 else None
+    city = parts[1] if len(parts) > 1 else None
+    return province, city
+
+
 class PostCreate(BaseModel):
     title: str
     content: str
@@ -517,6 +526,8 @@ class PostCreate(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
+    province = Optional[str] = None 
+    city     = Optional[str] = None
 
 class PostAuthor(BaseModel):
     id: int
@@ -548,6 +559,8 @@ class PostOut(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
+    province = Optional[str] = None 
+    city     = Optional[str] = None
 
 class PostsOut(BaseModel):
     items: List[PostOut]
@@ -602,9 +615,15 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         company_agency=body.company_agency,
         agency_call=body.agency_call,
     )
+
+    province, city = split_address(body.business_address)
+    post.province = province
+    post.city     = city
+
     db.add(post)
     db.commit()
     db.refresh(post)
+
     return PostOut(
         id=post.id,
         author=PostAuthor(id=user.id, username=user.username),
@@ -631,6 +650,8 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         company_trustee=post.company_trustee,
         company_agency=post.company_agency,
         agency_call=post.agency_call,
+        province=post.province,
+        city=post.city, 
     )
 
 
@@ -672,6 +693,8 @@ def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depe
             company_trustee=p.company_trustee,
             company_agency=p.company_agency,
             agency_call=p.agency_call,
+            province = p.province,
+            city=p.city,
         )
         for p in rows
     ]
@@ -711,6 +734,8 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         company_trustee=p.company_trustee,
         company_agency=p.company_agency,
         agency_call=p.agency_call,
+        province = p.province,
+        city=p.city,
     )
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")).resolve()

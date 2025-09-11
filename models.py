@@ -82,7 +82,8 @@ class Community_User(Base):
     name          = Column(String(50),  nullable=True)
     phone_number  = Column(String(20),  nullable=True)  
     position      = Column(String(50),  nullable=True)   
-    region        = Column(String(100), nullable=True) 
+    region        = Column(String(100), nullable=True)
+    signup_date = Column(Date, nullable=True, default=date.today)
    
 
 class Community_Post(Base):
@@ -112,7 +113,9 @@ class Community_Post(Base):
     company_constructor = Column(String(255))       
     company_trustee = Column(String(255))              
     company_agency = Column(String(255))          
-    agency_call = Column(String(50))            
+    agency_call = Column(String(50))
+    province = Column(String(50), nullable=True)   
+    city     = Column(String(50), nullable=True)              
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
     comments = relationship("Community_Comment", back_populates="post", cascade="all, delete-orphan")
