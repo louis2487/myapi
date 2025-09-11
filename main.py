@@ -558,8 +558,8 @@ class PostOut(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
-    province = Optional[str] = None 
-    city     = Optional[str] = None
+    province: Optional[str] = None 
+    city: Optional[str] = None
 
 class PostsOut(BaseModel):
     items: List[PostOut]
