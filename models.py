@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey,Date
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date
 from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
