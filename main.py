@@ -692,7 +692,7 @@ def list_posts(
     db: Session = Depends(get_db)
     ):
     q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
-     if status in ("published", "closed"):   
+    if status in ("published", "closed"):   
         q = q.filter(Community_Post.status == status)
 
     if cursor:
