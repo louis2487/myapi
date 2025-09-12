@@ -15,7 +15,7 @@ import crud
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import base64, json
 from googleapiclient.errors import HttpError
-from typing import Optional, List
+from typing import Optional, List, Literal
 import uuid
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -502,6 +502,7 @@ def split_address(addr: str):
     city = parts[1] if len(parts) > 1 else None
     return province, city
 
+StatusLiteral = Literal["published", "closed"]
 
 class PostCreate(BaseModel):
     title: str
@@ -526,6 +527,7 @@ class PostCreate(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
+    status: Optional[StatusLiteral] = "published"
 
 
 class PostAuthor(BaseModel):
@@ -560,6 +562,7 @@ class PostOut(BaseModel):
     agency_call: Optional[str] = None
     province: Optional[str] = None 
     city: Optional[str] = None
+    status: StatusLiteral
 
 class PostsOut(BaseModel):
     items: List[PostOut]
@@ -568,6 +571,31 @@ class PostsOut(BaseModel):
 class UploadBase64Request(BaseModel):
     filename: str
     base64: str
+
+class PostUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    image_url: Optional[str] = None
+    contract_fee: Optional[str] = None
+    workplace_address: Optional[str] = None
+    workplace_map_url: Optional[str] = None
+    business_address: Optional[str] = None
+    business_map_url: Optional[str] = None
+    workplace_lat: Optional[float] = None
+    workplace_lng: Optional[float] = None
+    business_lat:  Optional[float] = None
+    business_lng:  Optional[float] = None
+    job_industry: Optional[str] = None
+    job_category: Optional[str] = None
+    pay_support: Optional[bool] = None
+    meal_support: Optional[bool] = None
+    house_support: Optional[bool] = None
+    company_developer: Optional[str] = None
+    company_constructor: Optional[str] = None
+    company_trustee: Optional[str] = None
+    company_agency: Optional[str] = None
+    agency_call: Optional[str] = None
+    status: Optional[StatusLiteral] = None
 
 #--------------------Comments update-----------------------
 class CommentCreate(BaseModel):
@@ -613,6 +641,7 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         company_trustee=body.company_trustee,
         company_agency=body.company_agency,
         agency_call=body.agency_call,
+        status = body.status or "published",
     )
 
     province, city = split_address(body.business_address)
@@ -651,12 +680,21 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         agency_call=post.agency_call,
         province=post.province,
         city=post.city, 
+        status = post.status,
     )
 
 
 @app.get("/community/posts", response_model=PostsOut)
-def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depends(get_db)):
+def list_posts(
+    cursor: Optional[str] = None,
+    limit: int = 1000,
+    status: Optional[str] = None, 
+    db: Session = Depends(get_db)
+    ):
     q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
+     if status in ("published", "closed"):   
+        q = q.filter(Community_Post.status == status)
+
     if cursor:
         try:
             cur_dt = datetime.fromisoformat(cursor)
@@ -694,6 +732,7 @@ def list_posts(cursor: Optional[str] = None, limit: int = 10, db: Session = Depe
             agency_call=p.agency_call,
             province = p.province,
             city=p.city,
+            status=p.status,   
         )
         for p in rows
     ]
@@ -735,7 +774,83 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         agency_call=p.agency_call,
         province = p.province,
         city=p.city,
+        status=p.status,
     )
+
+
+@app.put("/community/posts/{post_id}", response_model=PostOut)
+def update_post(
+    post_id: int,
+    body: PostUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_community_user)
+):
+    post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
+    if post.user_id != user.id:
+        raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
+
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(post, key, value)
+
+    if body.business_address is not None:
+        province, city = split_address(body.business_address)
+        post.province = province
+        post.city = city
+
+    db.commit()
+    db.refresh(post)
+
+    return PostOut(
+        id=post.id,
+        author=PostAuthor(id=user.id, username=user.username),
+        title=post.title,
+        content=post.content,
+        image_url=post.image_url,
+        created_at=post.created_at,
+        contract_fee=post.contract_fee,
+        workplace_address=post.workplace_address,
+        workplace_map_url=post.workplace_map_url,
+        business_address=post.business_address,
+        business_map_url=post.business_map_url,
+        workplace_lat=post.workplace_lat,
+        workplace_lng=post.workplace_lng,
+        business_lat=post.business_lat,
+        business_lng=post.business_lng,
+        job_industry=post.job_industry,
+        job_category=post.job_category,
+        pay_support=post.pay_support,
+        meal_support=post.meal_support,
+        house_support=post.house_support,
+        company_developer=post.company_developer,
+        company_constructor=post.company_constructor,
+        company_trustee=post.company_trustee,
+        company_agency=post.company_agency,
+        agency_call=post.agency_call,
+        province=post.province,
+        city=post.city,
+        status=post.status,
+    )
+
+
+@app.delete("/community/posts/{post_id}")
+def delete_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_community_user)
+):
+    post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
+    if post.user_id != user.id:
+        raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
+
+    db.delete(post)
+    db.commit()
+    return {"ok": True, "message": "삭제되었습니다."}
+
+
 
 STATIC_DIR = Path(os.getenv("STATIC_DIR", "/data/uploads")).resolve()
 STATIC_DIR.mkdir(parents=True, exist_ok=True)

@@ -115,7 +115,8 @@ class Community_Post(Base):
     company_agency = Column(String(255))          
     agency_call = Column(String(50))
     province = Column(String(50), nullable=True)   
-    city     = Column(String(50), nullable=True)              
+    city     = Column(String(50), nullable=True)
+    status = Column(String(20), nullable=False, default="published")               
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
     comments = relationship("Community_Comment", back_populates="post", cascade="all, delete-orphan")
