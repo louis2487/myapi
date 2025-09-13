@@ -20,6 +20,8 @@ import uuid
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import re
+from fastapi.responses import FileResponse
+import openpyxl, tempfile
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
 bearer = HTTPBearer(auto_error=True)
@@ -930,3 +932,24 @@ def list_comments(
     items = rows[:limit]
     next_cur = items[-1].created_at.isoformat() if len(rows) > limit else None
     return CommentListOut(items=items, next_cursor=next_cur)
+
+@app.get("/community/users/export")
+def export_users(db: Session = Depends(get_db), user=Depends(get_current_community_user)):
+    if user.username != "admin":
+        raise HTTPException(403, "관리자만 접근 가능")
+
+    users = db.query(Community_User).all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Users"
+
+    ws.append(["ID", "Username", "Name", "Phone", "Position", "Region", "Signup Date"])
+
+    for u in users:
+        ws.append([u.id, u.username, u.name, u.phone_number, u.position, u.region, u.signup_date])
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    wb.save(tmp.name)
+
+    return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
