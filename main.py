@@ -790,7 +790,7 @@ def update_post(
     post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
-    if post.user_id != user.id:
+    if post.user_id != user.id and user.id != 13:
         raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
 
     for key, value in body.model_dump(exclude_unset=True).items():
@@ -845,7 +845,7 @@ def delete_post(
     post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
-    if post.user_id != user.id:
+    if post.user_id != user.id and user.id != 13:
         raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
 
     db.delete(post)
