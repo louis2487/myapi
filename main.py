@@ -935,7 +935,7 @@ def list_comments(
 
 @app.get("/community/users/export")
 def export_users(db: Session = Depends(get_db), user=Depends(get_current_community_user)):
-    if user.username != "admin":
+    if user.username != "Admin":
         raise HTTPException(403, "관리자만 접근 가능")
 
     users = db.query(Community_User).all()
