@@ -953,3 +953,37 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
     wb.save(tmp.name)
 
     return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
+
+
+@app.get("/search")
+async def search_posts(
+    q: Optional[str] = Query(None, description="제목 검색어(부분일치)"),
+    after_id: Optional[int] = Query(None, description="커서(이 id보다 작은 것)"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    async with async_session() as s:  # type: AsyncSession
+        stmt = select(Post).order_by(Post.id.desc()).limit(limit)
+        if q:
+            # ILIKE + trigram 인덱스가 붙어 있어 빠름
+            stmt = stmt.where(Post.title.ilike(f"%{q}%"))
+        if after_id:
+            stmt = stmt.where(Post.id < after_id)
+
+        rows = (await s.execute(stmt)).scalars().all()
+
+        # next_cursor 계산
+        next_cursor = rows[-1].id if rows else None
+
+        # total은 필요 시 별도 쿼리(리스트형 무한스크롤이면 보통 생략)
+        return {
+            "items": [
+                {
+                    "id": r.id,
+                    "title": r.title,
+                    "summary": getattr(r, "summary", None),
+                    "content": getattr(r, "content", None),
+                    "created_at": getattr(r, "created_at", None),
+                } for r in rows
+            ],
+            "next_cursor": next_cursor,
+        }    
