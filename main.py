@@ -963,11 +963,13 @@ async def search_posts(
 ):
     async with async_session() as s:
         try:
-            stmt = select(Post).order_by(Post.id.desc()).limit(limit)
+            stmt = select(Community_Post).order_by(Community_Post.id.desc()).limit(limit)
+
             if q:
-                stmt = stmt.where(Post.title.ilike(f"%{q}%"))
+                stmt = stmt.where(func.lower(Community_Post.title).like(f"%{q.lower()}%"))
             if after_id:
-                stmt = stmt.where(Post.id < after_id)
+                stmt = stmt.where(Community_Post.id < after_id)
+
             rows = (await s.execute(stmt)).scalars().all()
             next_cursor = rows[-1].id if rows else None
 
@@ -983,6 +985,7 @@ async def search_posts(
             ]
 
             return JSONResponse(content={"items": items, "next_cursor": next_cursor})
+
         except Exception as e:
             print("❌ [검색 오류]", e)
             return JSONResponse(content={"items": [], "next_cursor": None})
