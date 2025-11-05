@@ -961,29 +961,30 @@ async def search_posts(
     after_id: Optional[int] = Query(None, description="커서(이 id보다 작은 것)"),
     limit: int = Query(20, ge=1, le=100),
 ):
-    async with async_session() as s:  # type: AsyncSession
-        stmt = select(Post).order_by(Post.id.desc()).limit(limit)
-        if q:
-            # ILIKE + trigram 인덱스가 붙어 있어 빠름
-            stmt = stmt.where(Post.title.ilike(f"%{q}%"))
-        if after_id:
-            stmt = stmt.where(Post.id < after_id)
+    async with async_session() as s:
+        try:
+            stmt = select(Post).order_by(Post.id.desc()).limit(limit)
 
-        rows = (await s.execute(stmt)).scalars().all()
+            if q:
+                stmt = stmt.where(Post.title.ilike(f"%{q}%"))
+            if after_id:
+                stmt = stmt.where(Post.id < after_id)
 
-        # next_cursor 계산
-        next_cursor = rows[-1].id if rows else None
+            rows = (await s.execute(stmt)).scalars().all()
+            next_cursor = rows[-1].id if rows else None
 
-        # total은 필요 시 별도 쿼리(리스트형 무한스크롤이면 보통 생략)
-        return {
-            "items": [
-                {
-                    "id": r.id,
-                    "title": r.title,
+            items = []
+            for r in rows:
+                items.append({
+                    "id": getattr(r, "id", None),
+                    "title": getattr(r, "title", ""),
                     "summary": getattr(r, "summary", None),
                     "content": getattr(r, "content", None),
-                    "created_at": getattr(r, "created_at", None),
-                } for r in rows
-            ],
-            "next_cursor": next_cursor,
-        }    
+                    "created_at": str(getattr(r, "created_at", "")) if getattr(r, "created_at", None) else None,
+                })
+
+            return {"items": items, "next_cursor": next_cursor}
+        
+        except Exception as e:
+            print("❌ [검색 오류]", e)
+            return {"items": [], "next_cursor": None}
