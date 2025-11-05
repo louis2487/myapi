@@ -957,29 +957,38 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
 
 @app.get("/search")
 async def search_posts(
-    q: Optional[str] = Query(None),
-    after_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None, description="제목 검색어(부분일치)"),
+    after_id: Optional[int] = Query(None, description="커서(이 id보다 작은 것)"),
     limit: int = Query(20, ge=1, le=100),
 ):
-    async with async_session() as s:
+    async with async_session() as s:  # type: AsyncSession
         try:
+            # ✅ community_posts 테이블로 명시적 접근
             stmt = select(Community_Post).order_by(Community_Post.id.desc()).limit(limit)
 
+            # ✅ 제목 부분 일치 검색 (모든 DB 호환)
             if q:
                 stmt = stmt.where(func.lower(Community_Post.title).like(f"%{q.lower()}%"))
             if after_id:
                 stmt = stmt.where(Community_Post.id < after_id)
 
             rows = (await s.execute(stmt)).scalars().all()
+            print("🔍 검색어:", q, "결과 수:", len(rows))
+
             next_cursor = rows[-1].id if rows else None
 
+            # ✅ 필요한 필드만 프론트에 반환
             items = [
                 {
                     "id": r.id,
                     "title": r.title,
-                    "summary": r.summary,
                     "content": r.content,
                     "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "city": r.city,
+                    "province": r.province,
+                    "job_industry": r.job_industry,
+                    "job_category": r.job_category,
+                    "workplace_address": r.workplace_address,
                 }
                 for r in rows
             ]
