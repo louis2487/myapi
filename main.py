@@ -957,34 +957,32 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
 
 @app.get("/search")
 async def search_posts(
-    q: Optional[str] = Query(None, description="제목 검색어(부분일치)"),
-    after_id: Optional[int] = Query(None, description="커서(이 id보다 작은 것)"),
+    q: Optional[str] = Query(None),
+    after_id: Optional[int] = Query(None),
     limit: int = Query(20, ge=1, le=100),
 ):
     async with async_session() as s:
         try:
             stmt = select(Post).order_by(Post.id.desc()).limit(limit)
-
             if q:
                 stmt = stmt.where(Post.title.ilike(f"%{q}%"))
             if after_id:
                 stmt = stmt.where(Post.id < after_id)
-
             rows = (await s.execute(stmt)).scalars().all()
             next_cursor = rows[-1].id if rows else None
 
-            items = []
-            for r in rows:
-                items.append({
-                    "id": getattr(r, "id", None),
-                    "title": getattr(r, "title", ""),
-                    "summary": getattr(r, "summary", None),
-                    "content": getattr(r, "content", None),
-                    "created_at": str(getattr(r, "created_at", "")) if getattr(r, "created_at", None) else None,
-                })
+            items = [
+                {
+                    "id": r.id,
+                    "title": r.title,
+                    "summary": r.summary,
+                    "content": r.content,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
 
-            return {"items": items, "next_cursor": next_cursor}
-        
+            return JSONResponse(content={"items": items, "next_cursor": next_cursor})
         except Exception as e:
             print("❌ [검색 오류]", e)
-            return {"items": [], "next_cursor": None}
+            return JSONResponse(content={"items": [], "next_cursor": None})
