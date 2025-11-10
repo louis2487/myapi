@@ -958,53 +958,80 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
 @app.post("/community/posts/{post_id}/like")
 async def like_post(
     post_id: int,
-    user_id: int = Body(...),      
+    username: str = Body(...),            
     s: Session = Depends(get_db),
 ):
-    # 중복 체크
-    exists = await s.scalar(
-        select(PostLike).where(PostLike.user_id == user_id, PostLike.post_id == post_id)
-    )
-    if exists:
-        return JSONResponse({"detail": "이미 좋아요 누름"}, status_code=400)
+    user = s.execute(select(User).where(User.username == username)).scalar()
+    if not user:
+        raise HTTPException(status_code=400, detail="invalid username")
 
-    s.add(PostLike(user_id=user_id, post_id=post_id))
-    await s.commit()
+    exists = s.execute(
+        select(PostLike).where(
+            PostLike.user_id == user.id, PostLike.post_id == post_id
+        )
+    ).scalar()
+    if exists:
+        raise HTTPException(status_code=400, detail="already liked")
+
+    s.add(PostLike(user_id=user.id, post_id=post_id))
+    s.commit()
     return {"ok": True}
 
 
 @app.delete("/community/posts/{post_id}/like")
 async def unlike_post(
     post_id: int,
-    user_id: int = Body(...),      
+    username: str = Body(...),           
     s: Session = Depends(get_db),
 ):
-    row = await s.scalar(
-        select(PostLike).where(PostLike.user_id == user_id, PostLike.post_id == post_id)
-    )
+    user = s.execute(select(User).where(User.username == username)).scalar()
+    if not user:
+        raise HTTPException(status_code=400, detail="invalid username")
+
+    row = s.execute(
+        select(PostLike).where(
+            PostLike.user_id == user.id, PostLike.post_id == post_id
+        )
+    ).scalar()
     if not row:
-        return JSONResponse({"detail": "좋아요 안됨"}, status_code=400)
+        raise HTTPException(status_code=400, detail="not liked")
 
-    await s.delete(row)
-    await s.commit()
+    s.delete(row)
+    s.commit()
     return {"ok": True}
-
 
 @app.get("/community/posts/liked")
 async def get_liked_posts(
-    user_id: int,        
-    cursor: Optional[str] = None,
+    username: str,                      
+    cursor: Optional[str] = None,      
     limit: int = 20,
     s: Session = Depends(get_db),
 ):
+    user = s.execute(select(User).where(User.username == username)).scalar()
+    if not user:
+        raise HTTPException(status_code=400, detail="invalid username")
+
     q = (
-        select(Community_Post)
+        s.query(Community_Post)
         .join(PostLike, PostLike.post_id == Community_Post.id)
-        .where(PostLike.user_id == user_id)
+        .filter(PostLike.user_id == user.id)
         .order_by(PostLike.created_at.desc())
-        .limit(limit)
     )
-    rows = (await s.execute(q)).scalars().all()
-    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    if cursor:
+        dt = datetime.fromisoformat(cursor)
+        q = q.filter(PostLike.created_at < dt)
+
+    rows = q.limit(limit).all()
+
+    if rows:
+        last_like_dt = (
+            s.query(PostLike.created_at)
+            .filter(PostLike.user_id == user.id, PostLike.post_id == rows[-1].id)
+            .order_by(PostLike.created_at.desc())
+            .first()
+        )
+        next_cursor = last_like_dt[0].isoformat() if last_like_dt else None
+    else:
+        next_cursor = None
 
     return {"items": [to_post_out(r) for r in rows], "next_cursor": next_cursor}
