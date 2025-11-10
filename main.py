@@ -955,46 +955,46 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
     return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
 
 
-@app.get("/search")
-async def search_posts(
-    q: Optional[str] = Query(None, description="제목 검색어(부분일치)"),
-    after_id: Optional[int] = Query(None, description="커서(이 id보다 작은 것)"),
-    limit: int = Query(20, ge=1, le=100),
+@app.post("/community/posts/{post_id}/like")
+async def like_post(post_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(async_session)):
+    # 중복 방지
+    exists = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
+    if exists:
+        return JSONResponse({"detail": "이미 좋아요 누름"}, status_code=400)
+
+    s.add(PostLike(user_id=user.id, post_id=post_id))
+    await s.commit()
+    return {"success": True}
+
+
+@app.delete("/community/posts/{post_id}/like")
+async def unlike_post(post_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(async_session)):
+    row = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
+    if not row:
+        return JSONResponse({"detail": "좋아요 안한 글"}, status_code=400)
+    await s.delete(row)
+    await s.commit()
+    return {"success": True}
+
+
+@app.get("/community/posts/liked")
+async def get_liked_posts(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(20),
+    s: AsyncSession = Depends(async_session),
+    user: User = Depends(current_user),
 ):
-    async with async_session() as s:  # type: AsyncSession
-        try:
-            # ✅ community_posts 테이블로 명시적 접근
-            stmt = select(Community_Post).order_by(Community_Post.id.desc()).limit(limit)
+    stmt = (
+        select(Post)
+        .join(PostLike, PostLike.post_id == Post.id)
+        .where(PostLike.user_id == user.id)
+        .order_by(PostLike.created_at.desc())
+        .limit(limit)
+    )
+    if cursor:
+        dt = datetime.fromisoformat(cursor)
+        stmt = stmt.where(PostLike.created_at < dt)
 
-            # ✅ 제목 부분 일치 검색 (모든 DB 호환)
-            if q:
-                stmt = stmt.where(func.lower(Community_Post.title).like(f"%{q.lower()}%"))
-            if after_id:
-                stmt = stmt.where(Community_Post.id < after_id)
-
-            rows = (await s.execute(stmt)).scalars().all()
-            print("🔍 검색어:", q, "결과 수:", len(rows))
-
-            next_cursor = rows[-1].id if rows else None
-
-            # ✅ 필요한 필드만 프론트에 반환
-            items = [
-                {
-                    "id": r.id,
-                    "title": r.title,
-                    "content": r.content,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                    "city": r.city,
-                    "province": r.province,
-                    "job_industry": r.job_industry,
-                    "job_category": r.job_category,
-                    "workplace_address": r.workplace_address,
-                }
-                for r in rows
-            ]
-
-            return JSONResponse(content={"items": items, "next_cursor": next_cursor})
-
-        except Exception as e:
-            print("❌ [검색 오류]", e)
-            return JSONResponse(content={"items": [], "next_cursor": None})
+    rows = (await s.execute(stmt)).scalars().all()
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return {"items": rows, "next_cursor": next_cursor}
