@@ -956,45 +956,55 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
 
 
 @app.post("/community/posts/{post_id}/like")
-async def like_post(post_id: int, user: User = Depends(get_current_community_user), s: Session = Depends(get_db)):
-    # 중복 방지
-    exists = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
+async def like_post(
+    post_id: int,
+    user_id: int = Body(...),      
+    s: Session = Depends(get_db),
+):
+    # 중복 체크
+    exists = await s.scalar(
+        select(PostLike).where(PostLike.user_id == user_id, PostLike.post_id == post_id)
+    )
     if exists:
         return JSONResponse({"detail": "이미 좋아요 누름"}, status_code=400)
 
-    s.add(PostLike(user_id=user.id, post_id=post_id))
+    s.add(PostLike(user_id=user_id, post_id=post_id))
     await s.commit()
-    return {"success": True}
+    return {"ok": True}
 
 
 @app.delete("/community/posts/{post_id}/like")
-async def unlike_post(post_id: int, user: User = Depends(get_current_community_user), s: Session = Depends(get_db)):
-    row = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
+async def unlike_post(
+    post_id: int,
+    user_id: int = Body(...),      
+    s: Session = Depends(get_db),
+):
+    row = await s.scalar(
+        select(PostLike).where(PostLike.user_id == user_id, PostLike.post_id == post_id)
+    )
     if not row:
-        return JSONResponse({"detail": "좋아요 안한 글"}, status_code=400)
+        return JSONResponse({"detail": "좋아요 안됨"}, status_code=400)
+
     await s.delete(row)
     await s.commit()
-    return {"success": True}
+    return {"ok": True}
 
 
 @app.get("/community/posts/liked")
 async def get_liked_posts(
-    cursor: Optional[str] = Query(None),
-    limit: int = Query(20),
+    user_id: int,        
+    cursor: Optional[str] = None,
+    limit: int = 20,
     s: Session = Depends(get_db),
-    user: User = Depends(get_current_community_user),
 ):
-    stmt = (
-        select(Post)
-        .join(PostLike, PostLike.post_id == Post.id)
-        .where(PostLike.user_id == user.id)
+    q = (
+        select(Community_Post)
+        .join(PostLike, PostLike.post_id == Community_Post.id)
+        .where(PostLike.user_id == user_id)
         .order_by(PostLike.created_at.desc())
         .limit(limit)
     )
-    if cursor:
-        dt = datetime.fromisoformat(cursor)
-        stmt = stmt.where(PostLike.created_at < dt)
-
-    rows = (await s.execute(stmt)).scalars().all()
+    rows = (await s.execute(q)).scalars().all()
     next_cursor = rows[-1].created_at.isoformat() if rows else None
-    return {"items": rows, "next_cursor": next_cursor}
+
+    return {"items": [to_post_out(r) for r in rows], "next_cursor": next_cursor}
