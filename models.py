@@ -137,12 +137,12 @@ class Community_Comment(Base):
 
 class PostLike(Base):
     __tablename__ = "post_likes"
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    post_id = Column(Integer, ForeignKey("community_posts.id"), nullable=False)
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    post_id = Column(Integer, ForeignKey("community_posts.id"), primary_key=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("user_id", "post_id", name="uq_post_like_user_post"),
         Index("ix_post_likes_user_created", "user_id", "created_at"),
         Index("ix_post_likes_post", "post_id"),
     )
