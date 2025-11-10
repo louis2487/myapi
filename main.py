@@ -956,7 +956,7 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
 
 
 @app.post("/community/posts/{post_id}/like")
-async def like_post(post_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(async_session)):
+async def like_post(post_id: int, user: User = Depends(get_current_community_user), s: AsyncSession = Depends(async_session)):
     # 중복 방지
     exists = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
     if exists:
@@ -968,7 +968,7 @@ async def like_post(post_id: int, user: User = Depends(current_user), s: AsyncSe
 
 
 @app.delete("/community/posts/{post_id}/like")
-async def unlike_post(post_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(async_session)):
+async def unlike_post(post_id: int, user: User = Depends(get_current_community_user), s: AsyncSession = Depends(async_session)):
     row = await s.scalar(select(PostLike).where(PostLike.user_id == user.id, PostLike.post_id == post_id))
     if not row:
         return JSONResponse({"detail": "좋아요 안한 글"}, status_code=400)
@@ -982,7 +982,7 @@ async def get_liked_posts(
     cursor: Optional[str] = Query(None),
     limit: int = Query(20),
     s: AsyncSession = Depends(async_session),
-    user: User = Depends(current_user),
+    user: User = Depends(get_current_community_user),
 ):
     stmt = (
         select(Post)
