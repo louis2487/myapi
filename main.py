@@ -566,6 +566,37 @@ class PostOut(BaseModel):
     city: Optional[str] = None
     status: StatusLiteral
 
+class PostOut2(BaseModel):
+    id: int
+    author: PostAuthor
+    title: str
+    content: str
+    image_url: Optional[str] = None
+    created_at: datetime
+    contract_fee: Optional[str] = None
+    workplace_address: Optional[str] = None
+    workplace_map_url: Optional[str] = None
+    business_address: Optional[str] = None
+    business_map_url: Optional[str] = None
+    workplace_lat: Optional[float] = None
+    workplace_lng: Optional[float] = None
+    business_lat:  Optional[float] = None
+    business_lng:  Optional[float] = None
+    job_industry: Optional[str] = None
+    job_category: Optional[str] = None
+    pay_support: Optional[bool] = None
+    meal_support: Optional[bool] = None
+    house_support: Optional[bool] = None
+    company_developer: Optional[str] = None
+    company_constructor: Optional[str] = None
+    company_trustee: Optional[str] = None
+    company_agency: Optional[str] = None
+    agency_call: Optional[str] = None
+    province: Optional[str] = None 
+    city: Optional[str] = None
+    status: StatusLiteral
+    liked: Optional[bool] = False
+
 class PostsOut(BaseModel):
     items: List[PostOut]
     next_cursor: Optional[str] = None  
@@ -1049,8 +1080,9 @@ async def get_liked_posts(
         last_dt, last_pid = result[-1][1], result[-1][2]
         next_cursor = f"{last_dt.isoformat()}__{last_pid}"
 
-    posts: List[PostOut] = []
-    for p in rows:
-        posts.append(PostOut.from_orm(p).copy(update={"liked": True}))
+    posts: List[PostOut] = [
+    PostOut2.model_validate(p, from_attributes=True).model_copy(update={"liked": True})
+    for p in rows
+    ]
 
     return {"items": posts, "next_cursor": next_cursor}
