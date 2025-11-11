@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like
 import hashlib
 import jwt 
-from sqlalchemy import func ,select 
+from sqlalchemy import func ,select, or_, and_
 from google_play import get_service, PACKAGE_NAME
 import crud
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -955,83 +955,98 @@ def export_users(db: Session = Depends(get_db), user=Depends(get_current_communi
     return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
 
 
-@app.post("/community/posts/{post_id}/like")
+@app.post("/community/posts/{post_id}/like/{username}")
 async def like_post(
     post_id: int,
-    username: str = Body(...),            
-    s: Session = Depends(get_db),
+    username: str,            
+    db: Session = Depends(get_db),
 ):
-    user = s.execute(select(User).where(User.username == username)).scalar()
-    if not user:
-        raise HTTPException(status_code=400, detail="invalid username")
+    isUsername = db.execute(select(Community_User).where(Community_User.username == username)).scalar()
+    if not isUsername:
+        raise HTTPException(status_code=400, detail="none username")
 
-    exists = s.execute(
-        select(PostLike).where(
-            PostLike.user_id == user.id, PostLike.post_id == post_id
+    exists = db.execute(
+        select(Post_Like).where(
+            Post_Like.username == username, Post_Like.post_id == post_id
         )
     ).scalar()
     if exists:
-        raise HTTPException(status_code=400, detail="already liked")
+        raise HTTPException(status_code=400, detail="already row")
 
-    s.add(PostLike(user_id=user.id, post_id=post_id))
-    s.commit()
+    db.add(Post_Like(username=username, post_id=post_id))
+    db.commit()
     return {"ok": True}
 
 
-@app.delete("/community/posts/{post_id}/like")
+@app.delete("/community/posts/{post_id}/like/{username}")
 async def unlike_post(
     post_id: int,
-    username: str = Body(...),           
-    s: Session = Depends(get_db),
+    username: str,           
+    db: Session = Depends(get_db),
 ):
-    user = s.execute(select(User).where(User.username == username)).scalar()
-    if not user:
-        raise HTTPException(status_code=400, detail="invalid username")
+    isUsername = db.execute(select(Community_User).where(Community_User.username == username)).scalar()
+    if not isUsername:
+        raise HTTPException(status_code=400, detail="none username")
 
-    row = s.execute(
-        select(PostLike).where(
-            PostLike.user_id == user.id, PostLike.post_id == post_id
+    isRow = db.execute(
+        select(Post_Like).where(
+            Post_Like.username == username, Post_Like.post_id == post_id
         )
-    ).scalar()
-    if not row:
-        raise HTTPException(status_code=400, detail="not liked")
+    ).scalars().first()
+    if not isRow:
+        raise HTTPException(status_code=400, detail="not row")
 
-    s.delete(row)
-    s.commit()
+    db.delete(isRow)
+    db.commit()
     return {"ok": True}
 
-@app.get("/community/posts/liked")
+
+@app.get("/community/posts/liked/{username}")
 async def get_liked_posts(
-    username: str,                      
-    cursor: Optional[str] = None,      
+    username: str,
+    cursor: Optional[str] = None,
     limit: int = 20,
-    s: Session = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
-    user = s.execute(select(User).where(User.username == username)).scalar()
-    if not user:
-        raise HTTPException(status_code=400, detail="invalid username")
+    isUsername = db.execute(
+        select(Community_User).where(Community_User.username == username)
+    ).scalar()
+    if not isUsername:
+        raise HTTPException(status_code=404, detail="username not found")
 
-    q = (
-        s.query(Community_Post)
-        .join(PostLike, PostLike.post_id == Community_Post.id)
-        .filter(PostLike.user_id == user.id)
-        .order_by(PostLike.created_at.desc())
+    stmt = (
+        select(Community_Post, Post_Like.created_at, Post_Like.post_id)
+        .join(Post_Like, Post_Like.post_id == Community_Post.id)
+        .where(Post_Like.username == username)
+        .order_by(Post_Like.created_at.desc(), Post_Like.post_id.desc())
+        .limit(limit)
     )
+
     if cursor:
-        dt = datetime.fromisoformat(cursor)
-        q = q.filter(PostLike.created_at < dt)
+        try:
+            dt_str, pid_str = cursor.split("__", 1)
+            cur_dt = datetime.fromisoformat(dt_str)
+            cur_id = int(pid_str)
+            if cur_dt.tzinfo is None:
+                cur_dt = cur_dt.replace(tzinfo=timezone.utc)
+            stmt = stmt.where(
+                or_(
+                    Post_Like.created_at < cur_dt,
+                    and_(
+                        Post_Like.created_at == cur_dt,
+                        Post_Like.post_id < cur_id,
+                    ),
+                )
+            )
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid cursor format")
 
-    rows = q.limit(limit).all()
+    result = db.execute(stmt).all()  
+    rows = [r[0] for r in result]
 
-    if rows:
-        last_like_dt = (
-            s.query(PostLike.created_at)
-            .filter(PostLike.user_id == user.id, PostLike.post_id == rows[-1].id)
-            .order_by(PostLike.created_at.desc())
-            .first()
-        )
-        next_cursor = last_like_dt[0].isoformat() if last_like_dt else None
-    else:
-        next_cursor = None
+    next_cursor = None
+    if result:
+        last_dt, last_pid = result[-1][1], result[-1][2]
+        next_cursor = f"{last_dt.isoformat()}__{last_pid}"
 
     return {"items": [to_post_out(r) for r in rows], "next_cursor": next_cursor}

@@ -135,14 +135,14 @@ class Community_Comment(Base):
     user = relationship("Community_User", lazy="joined")
 
 
-class PostLike(Base):
+class Post_Like(Base):
     __tablename__ = "post_likes"
 
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    username = Column(String(50), ForeignKey("community_users.username"), primary_key=True)
     post_id = Column(Integer, ForeignKey("community_posts.id"), primary_key=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("ix_post_likes_user_created", "user_id", "created_at"),
+        Index("ix_post_likes_user_created", "username", "created_at"),
         Index("ix_post_likes_post", "post_id"),
     )
