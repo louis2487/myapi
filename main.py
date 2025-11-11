@@ -1049,4 +1049,8 @@ async def get_liked_posts(
         last_dt, last_pid = result[-1][1], result[-1][2]
         next_cursor = f"{last_dt.isoformat()}__{last_pid}"
 
-    return {"items": [to_post_out(r) for r in rows], "next_cursor": next_cursor}
+    posts: List[PostOut] = []
+    for p in rows:
+        posts.append(PostOut.from_orm(p).copy(update={"liked": True}))
+
+    return {"items": posts, "next_cursor": next_cursor}
