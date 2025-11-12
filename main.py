@@ -717,15 +717,73 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
     )
 
 
-@app.get("/community/posts", response_model=PostsOut)
+# @app.get("/community/posts", response_model=PostsOut)
+# def list_posts(
+#     cursor: Optional[str] = None,
+#     limit: int = 1000,
+#     status: Optional[str] = None, 
+#     db: Session = Depends(get_db)
+#     ):
+#     q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
+#     if status in ("published", "closed"):   
+#         q = q.filter(Community_Post.status == status)
+
+#     if cursor:
+#         try:
+#             cur_dt = datetime.fromisoformat(cursor)
+#             q = q.filter(Community_Post.created_at < cur_dt)
+#         except Exception:
+#             pass
+#     rows = q.limit(limit).all()
+
+#     items = [
+#         PostOut(
+#             id=p.id,
+#             author=PostAuthor(id=p.author.id, username=p.author.username),
+#             title=p.title,
+#             content=p.content,
+#             image_url=p.image_url,
+#             created_at=p.created_at,
+#             contract_fee=p.contract_fee,
+#             workplace_address=p.workplace_address,
+#             workplace_map_url=p.workplace_map_url,
+#             business_address=p.business_address,
+#             business_map_url=p.business_map_url,
+#             workplace_lat = p.workplace_lat,
+#             workplace_lng = p.workplace_lng,
+#             business_lat = p.business_lat,
+#             business_lng = p.business_lng,
+#             job_industry=p.job_industry,
+#             job_category=p.job_category,
+#             pay_support=p.pay_support,
+#             meal_support=p.meal_support,
+#             house_support=p.house_support,
+#             company_developer=p.company_developer,
+#             company_constructor=p.company_constructor,
+#             company_trustee=p.company_trustee,
+#             company_agency=p.company_agency,
+#             agency_call=p.agency_call,
+#             province = p.province,
+#             city=p.city,
+#             status=p.status,   
+#         )
+#         for p in rows
+#     ]
+#     next_cursor = rows[-1].created_at.isoformat() if rows else None
+#     return PostsOut(items=items, next_cursor=next_cursor)
+
+
+@app.get("/community/posts", response_model=PostsOut2)
 def list_posts(
-    cursor: Optional[str] = None,
-    limit: int = 1000,
-    status: Optional[str] = None, 
-    db: Session = Depends(get_db)
-    ):
+    username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명"),
+    cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
+    limit: int = Query(1000, ge=1, le=1000),
+    status: Optional[str] = Query(None, description="published | closed"),
+    db: Session = Depends(get_db),
+):
     q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
-    if status in ("published", "closed"):   
+
+    if status in ("published", "closed"):
         q = q.filter(Community_Post.status == status)
 
     if cursor:
@@ -734,10 +792,22 @@ def list_posts(
             q = q.filter(Community_Post.created_at < cur_dt)
         except Exception:
             pass
+
     rows = q.limit(limit).all()
 
+    liked_ids = set()
+    if username and rows:
+        post_ids = [p.id for p in rows]
+        
+        liked_rows = (
+            db.query(Post_Like.post_id)
+              .filter(Post_Like.username == username, Post_Like.post_id.in_(post_ids))
+              .all()
+        )
+        liked_ids = {pid for (pid,) in liked_rows}
+
     items = [
-        PostOut(
+        PostOut2(
             id=p.id,
             author=PostAuthor(id=p.author.id, username=p.author.username),
             title=p.title,
@@ -749,10 +819,10 @@ def list_posts(
             workplace_map_url=p.workplace_map_url,
             business_address=p.business_address,
             business_map_url=p.business_map_url,
-            workplace_lat = p.workplace_lat,
-            workplace_lng = p.workplace_lng,
-            business_lat = p.business_lat,
-            business_lng = p.business_lng,
+            workplace_lat=p.workplace_lat,
+            workplace_lng=p.workplace_lng,
+            business_lat=p.business_lat,
+            business_lng=p.business_lng,
             job_industry=p.job_industry,
             job_category=p.job_category,
             pay_support=p.pay_support,
@@ -763,15 +833,16 @@ def list_posts(
             company_trustee=p.company_trustee,
             company_agency=p.company_agency,
             agency_call=p.agency_call,
-            province = p.province,
+            province=p.province,
             city=p.city,
-            status=p.status,   
+            status=p.status,
+            liked=(p.id in liked_ids),   
         )
         for p in rows
     ]
-    next_cursor = rows[-1].created_at.isoformat() if rows else None
-    return PostsOut(items=items, next_cursor=next_cursor)
 
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return PostsOut2(items=items, next_cursor=next_cursor)
 
 
 @app.get("/community/posts/{post_id}", response_model=PostOut)
