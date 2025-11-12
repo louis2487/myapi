@@ -773,7 +773,7 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
 #     return PostsOut(items=items, next_cursor=next_cursor)
 
 
-@app.get("/community/posts", response_model=PostsOut2)
+@app.get("/community/posts", response_model=PostOut2)
 def list_posts(
     username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명"),
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
