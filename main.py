@@ -774,7 +774,7 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invalid username")
 
     post = Community_Post(
-        author=PostAuthor(id=userId, username=username),
+        user_id=userId,
         title=body.title,
         content=body.content,
         image_url=body.image_url,
@@ -839,7 +839,7 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
 
     return PostOut(
         id=post.id,
-        author=PostAuthor(id=post.author.id, username=post.author.username),
+        author=PostAuthor(id=userId, username=username),
         title=post.title,
         content=post.content,
         image_url=post.image_url,
