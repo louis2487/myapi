@@ -1003,16 +1003,9 @@ def list_posts(
     return PostsOut2(items=items, next_cursor=next_cursor)
 
 
-@app.get("/community/posts/{post_id}/{username}", response_model=PostOut)
-def get_post(post_id: int, db: Session = Depends(get_db), username: str):
-    userId = (
-        db.query(Community_User.id)
-          .filter(Community_User.username == username)
-          .scalar()
-    )
-    if not userId:
-        raise HTTPException(404, "Invalid username")
-
+@app.get("/community/posts/{post_id}", response_model=PostOut)
+def get_post(post_id: int, db: Session = Depends(get_db)):
+   
     p = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Post not found")
