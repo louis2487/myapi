@@ -828,10 +828,10 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_sup = body.item4_sup,
         agent = body.agent,
     )
-
-    province, city = split_address(body.business_address)
-    post.province = province
-    post.city     = city
+    if body.business_address:
+        province, city = split_address(body.business_address)
+        post.province = province
+        post.city     = city
 
     db.add(post)
     db.commit()
