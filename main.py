@@ -768,7 +768,7 @@ class CommentListOut(BaseModel):
 #---------------------------------------------------------------
 
 @app.post("/community/posts/{username}", response_model=PostOut)
-def create_post(body: PostCreate, db: Session = Depends(get_db), username: str):
+def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
     userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
     if not user:
         raise HTTPException(status_code=404, detail="Invalid username")
