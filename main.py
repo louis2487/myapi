@@ -767,10 +767,14 @@ class CommentListOut(BaseModel):
     next_cursor: Optional[str] = None
 #---------------------------------------------------------------
 
-@app.post("/community/posts", response_model=PostOut)
-def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = Depends(get_current_community_user)):
+@app.post("/community/posts/{username}", response_model=PostOut)
+def create_post(body: PostCreate, db: Session = Depends(get_db), username: str):
+    userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
+    if not user:
+        raise HTTPException(status_code=404, detail="Invalid username")
+
     post = Community_Post(
-        user_id=user.id,
+        author=PostAuthor(id=userId, username=username),
         title=body.title,
         content=body.content,
         image_url=body.image_url,
@@ -835,7 +839,7 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
 
     return PostOut(
         id=post.id,
-        author=PostAuthor(id=user.id, username=user.username),
+        author=PostAuthor(id=post.author.id, username=post.author.username),
         title=post.title,
         content=post.content,
         image_url=post.image_url,
@@ -913,7 +917,6 @@ def list_posts(
 
     if cursor:
         try:
-            \
             cur_dt = datetime.fromisoformat(cursor)
             q = q.filter(Community_Post.created_at < cur_dt)
         except Exception:
@@ -1000,8 +1003,16 @@ def list_posts(
     return PostsOut2(items=items, next_cursor=next_cursor)
 
 
-@app.get("/community/posts/{post_id}", response_model=PostOut)
-def get_post(post_id: int, db: Session = Depends(get_db)):
+@app.get("/community/posts/{post_id}/{username}", response_model=PostOut)
+def get_post(post_id: int, db: Session = Depends(get_db), username: str):
+    userId = (
+        db.query(Community_User.id)
+          .filter(Community_User.username == username)
+          .scalar()
+    )
+    if not userId:
+        raise HTTPException(404, "Invalid username")
+
     p = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -1071,14 +1082,11 @@ def update_post(
     post_id: int,
     body: PostUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_community_user)
 ):
     post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
-    if post.user_id != user.id and user.id != 13:
-        raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
-
+  
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(post, key, value)
 
@@ -1092,7 +1100,7 @@ def update_post(
 
     return PostOut(
         id=post.id,
-        author=PostAuthor(id=user.id, username=user.username),
+        author=PostAuthor(id=post.author.id, username=post.author.username),
         title=post.title,
         content=post.content,
         image_url=post.image_url,
@@ -1155,14 +1163,11 @@ def update_post(
 def delete_post(
     post_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_community_user)
 ):
     post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not post:
         raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
-    if post.user_id != user.id and user.id != 13:
-        raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
-
+ 
     db.delete(post)
     db.commit()
     return {"ok": True, "message": "삭제되었습니다."}
