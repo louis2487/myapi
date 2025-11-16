@@ -530,7 +530,36 @@ class PostCreate(BaseModel):
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
     status: Optional[StatusLiteral] = "published"
-
+    highlight_color: Optional[str] = None
+    highlight_content: Optional[str] = None
+    total_use: Optional[bool] = None
+    branch_use: Optional[bool] = None
+    leader_use: Optional[bool] = None
+    member_use: Optional[bool] = None
+    total_fee: Optional[str] = None
+    branch_fee: Optional[str] = None
+    leader_fee: Optional[str] = None
+    member_fee: Optional[str] = None
+    pay_use: Optional[bool] = None
+    meal_use: Optional[bool] = None
+    house_use: Optional[bool] = None
+    pay_sup: Optional[str] = None
+    meal_sup: Optional[bool] = None
+    house_sup: Optional[str] = None
+    item1_use: Optional[bool] = None    
+    item1_type: Optional[str] = None
+    item1_sup: Optional[str] = None
+    item2_use: Optional[bool] = None
+    item2_type: Optional[str] = None
+    item2_sup: Optional[str] = None
+    item3_use: Optional[bool] = None
+    item3_type: Optional[str] = None
+    item3_sup: Optional[str] = None
+    item4_use: Optional[bool] = None
+    item4_type: Optional[str] = None
+    item4_sup: Optional[str] = None
+    agent: Optional[str] = None
+   
 
 class PostAuthor(BaseModel):
     id: int
@@ -565,6 +594,37 @@ class PostOut(BaseModel):
     province: Optional[str] = None 
     city: Optional[str] = None
     status: StatusLiteral
+    highlight_color: Optional[str] = None
+    highlight_content: Optional[str] = None
+    total_use: Optional[bool] = None
+    branch_use: Optional[bool] = None
+    leader_use: Optional[bool] = None
+    member_use: Optional[bool] = None
+    total_fee: Optional[str] = None
+    branch_fee: Optional[str] = None
+    leader_fee: Optional[str] = None
+    member_fee: Optional[str] = None
+    pay_use: Optional[bool] = None
+    meal_use: Optional[bool] = None
+    house_use: Optional[bool] = None
+    pay_sup: Optional[str] = None
+    meal_sup: Optional[bool] = None
+    house_sup: Optional[str] = None
+    item1_use: Optional[bool] = None    
+    item1_type: Optional[str] = None
+    item1_sup: Optional[str] = None
+    item2_use: Optional[bool] = None
+    item2_type: Optional[str] = None
+    item2_sup: Optional[str] = None
+    item3_use: Optional[bool] = None
+    item3_type: Optional[str] = None
+    item3_sup: Optional[str] = None
+    item4_use: Optional[bool] = None
+    item4_type: Optional[str] = None
+    item4_sup: Optional[str] = None
+    agent: Optional[str] = None
+    
+    
 
 class PostOut2(BaseModel):
     id: int
@@ -596,6 +656,36 @@ class PostOut2(BaseModel):
     city: Optional[str] = None
     status: StatusLiteral
     liked: Optional[bool] = False
+    highlight_color: Optional[str] = None
+    highlight_content: Optional[str] = None
+    total_use: Optional[bool] = None
+    branch_use: Optional[bool] = None
+    leader_use: Optional[bool] = None
+    member_use: Optional[bool] = None
+    total_fee: Optional[str] = None
+    branch_fee: Optional[str] = None
+    leader_fee: Optional[str] = None
+    member_fee: Optional[str] = None
+    pay_use: Optional[bool] = None
+    meal_use: Optional[bool] = None
+    house_use: Optional[bool] = None
+    pay_sup: Optional[str] = None
+    meal_sup: Optional[bool] = None
+    house_sup: Optional[str] = None
+    item1_use: Optional[bool] = None    
+    item1_type: Optional[str] = None
+    item1_sup: Optional[str] = None
+    item2_use: Optional[bool] = None
+    item2_type: Optional[str] = None
+    item2_sup: Optional[str] = None
+    item3_use: Optional[bool] = None
+    item3_type: Optional[str] = None
+    item3_sup: Optional[str] = None
+    item4_use: Optional[bool] = None
+    item4_type: Optional[str] = None
+    item4_sup: Optional[str] = None
+    agent: Optional[str] = None
+ 
 
 class PostsOut(BaseModel):
     items: List[PostOut]
@@ -629,6 +719,35 @@ class PostUpdate(BaseModel):
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
     status: Optional[StatusLiteral] = None
+    highlight_color: Optional[str] = None
+    highlight_content: Optional[str] = None
+    total_use: Optional[bool] = None
+    branch_use: Optional[bool] = None
+    leader_use: Optional[bool] = None
+    member_use: Optional[bool] = None
+    total_fee: Optional[str] = None
+    branch_fee: Optional[str] = None
+    leader_fee: Optional[str] = None
+    member_fee: Optional[str] = None
+    pay_use: Optional[bool] = None
+    meal_use: Optional[bool] = None
+    house_use: Optional[bool] = None
+    pay_sup: Optional[str] = None
+    meal_sup: Optional[bool] = None
+    house_sup: Optional[str] = None
+    item1_use: Optional[bool] = None    
+    item1_type: Optional[str] = None
+    item1_sup: Optional[str] = None
+    item2_use: Optional[bool] = None
+    item2_type: Optional[str] = None
+    item2_sup: Optional[str] = None
+    item3_use: Optional[bool] = None
+    item3_type: Optional[str] = None
+    item3_sup: Optional[str] = None
+    item4_use: Optional[bool] = None
+    item4_type: Optional[str] = None
+    item4_sup: Optional[str] = None
+    agent: Optional[str] = None
 
 #--------------------Comments update-----------------------
 class CommentCreate(BaseModel):
@@ -675,6 +794,35 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         company_agency=body.company_agency,
         agency_call=body.agency_call,
         status = body.status or "published",
+        highlight_color = body.highlight_color,
+        highlight_content = body.highlight_content,
+        total_use = body.total_use,
+        branch_use = body.branch_use,
+        leader_use = body.leader_use,
+        member_use = body.member_use,
+        total_fee = body.total_fee,
+        branch_fee = body.branch_fee,
+        leader_fee = body.leader_fee,
+        member_fee = body.member_fee,
+        pay_use = body.pay_use,
+        meal_use = body.meal_use,
+        house_use = body.house_use,
+        pay_sup = body.pay_sup,
+        meal_sup = body.meal_sup,
+        house_sup = body.house_sup,
+        item1_use = body.item1_use,
+        item1_type = body.item1_type,
+        item1_sup = body.item1_sup,
+        item2_use = body.item2_use,
+        item2_type = body.item2_type,
+        item2_sup = body.item2_sup,
+        item3_use = body.item3_use,
+        item3_type = body.item3_type,
+        item3_sup = body.item3_sup,
+        item4_use = body.item4_use,
+        item4_type = body.item4_type,
+        item4_sup = body.item4_sup,
+        agent = body.agent,
     )
 
     province, city = split_address(body.business_address)
@@ -714,66 +862,40 @@ def create_post(body: PostCreate, db: Session = Depends(get_db), user: User = De
         province=post.province,
         city=post.city, 
         status = post.status,
+        highlight_color = post.highlight_color,
+        highlight_content = post.highlight_content,
+        total_use = post.total_use,
+        branch_use = post.branch_use,
+        leader_use = post.leader_use,
+        member_use = post.member_use,
+        total_fee = post.total_fee,
+        branch_fee = post.branch_fee,
+        leader_fee = post.leader_fee,
+        member_fee = post.member_fee,
+        pay_use = post.pay_use,
+        meal_use = post.meal_use,
+        house_use = post.house_use,
+        pay_sup = post.pay_sup,
+        meal_sup = post.meal_sup,
+        house_sup = post.house_sup,
+        item1_use = post.item1_use,
+        item1_type = post.item1_type,
+        item1_sup = post.item1_sup,
+        item2_use = post.item2_use,
+        item2_type = post.item2_type,
+        item2_sup = post.item2_sup,
+        item3_use = post.item3_use,
+        item3_type = post.item3_type,
+        item3_sup = post.item3_sup,
+        item4_use = post.item4_use,
+        item4_type = post.item4_type,
+        item4_sup = post.item4_sup,
+        agent = post.agent,
     )
 
 class PostsOut2(BaseModel):
     items: list[PostOut2]
     next_cursor: str | None = None
-
-# @app.get("/community/posts", response_model=PostsOut)
-# def list_posts(
-#     cursor: Optional[str] = None,
-#     limit: int = 1000,
-#     status: Optional[str] = None, 
-#     db: Session = Depends(get_db)
-#     ):
-#     q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
-#     if status in ("published", "closed"):   
-#         q = q.filter(Community_Post.status == status)
-
-#     if cursor:
-#         try:
-#             cur_dt = datetime.fromisoformat(cursor)
-#             q = q.filter(Community_Post.created_at < cur_dt)
-#         except Exception:
-#             pass
-#     rows = q.limit(limit).all()
-
-#     items = [
-#         PostOut(
-#             id=p.id,
-#             author=PostAuthor(id=p.author.id, username=p.author.username),
-#             title=p.title,
-#             content=p.content,
-#             image_url=p.image_url,
-#             created_at=p.created_at,
-#             contract_fee=p.contract_fee,
-#             workplace_address=p.workplace_address,
-#             workplace_map_url=p.workplace_map_url,
-#             business_address=p.business_address,
-#             business_map_url=p.business_map_url,
-#             workplace_lat = p.workplace_lat,
-#             workplace_lng = p.workplace_lng,
-#             business_lat = p.business_lat,
-#             business_lng = p.business_lng,
-#             job_industry=p.job_industry,
-#             job_category=p.job_category,
-#             pay_support=p.pay_support,
-#             meal_support=p.meal_support,
-#             house_support=p.house_support,
-#             company_developer=p.company_developer,
-#             company_constructor=p.company_constructor,
-#             company_trustee=p.company_trustee,
-#             company_agency=p.company_agency,
-#             agency_call=p.agency_call,
-#             province = p.province,
-#             city=p.city,
-#             status=p.status,   
-#         )
-#         for p in rows
-#     ]
-#     next_cursor = rows[-1].created_at.isoformat() if rows else None
-#     return PostsOut(items=items, next_cursor=next_cursor)
 
 
 @app.get("/community/posts", response_model=PostsOut2)
@@ -791,6 +913,7 @@ def list_posts(
 
     if cursor:
         try:
+            \
             cur_dt = datetime.fromisoformat(cursor)
             q = q.filter(Community_Post.created_at < cur_dt)
         except Exception:
@@ -839,7 +962,36 @@ def list_posts(
             province=p.province,
             city=p.city,
             status=p.status,
-            liked=(p.id in liked_ids),   
+            liked=(p.id in liked_ids),
+            highlight_color = p.highlight_color,
+            highlight_content = p.highlight_content,
+            total_use = p.total_use,
+            branch_use = p.branch_use,
+            leader_use = p.leader_use,
+            member_use = p.member_use,
+            total_fee = p.total_fee,
+            branch_fee = p.branch_fee,
+            leader_fee = p.leader_fee,
+            member_fee = p.member_fee,
+            pay_use = p.pay_use,
+            meal_use = p.meal_use,
+            house_use = p.house_use,
+            pay_sup = p.pay_sup,
+            meal_sup = p.meal_sup,
+            house_sup = p.house_sup,
+            item1_use = p.item1_use,
+            item1_type = p.item1_type,
+            item1_sup = p.item1_sup,
+            item2_use = p.item2_use,
+            item2_type = p.item2_type,
+            item2_sup = p.item2_sup,
+            item3_use = p.item3_use,
+            item3_type = p.item3_type,
+            item3_sup = p.item3_sup,
+            item4_use = p.item4_use,
+            item4_type = p.item4_type,
+            item4_sup = p.item4_sup,
+            agent = p.agent,   
         )
         for p in rows
     ]
@@ -882,6 +1034,35 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         province = p.province,
         city=p.city,
         status=p.status,
+        highlight_color = p.highlight_color,
+        highlight_content = p.highlight_content,
+        total_use = p.total_use,
+        branch_use = p.branch_use,
+        leader_use = p.leader_use,
+        member_use = p.member_use,
+        total_fee = p.total_fee,
+        branch_fee = p.branch_fee,
+        leader_fee = p.leader_fee,
+        member_fee = p.member_fee,
+        pay_use = p.pay_use,
+        meal_use = p.meal_use,
+        house_use = p.house_use,
+        pay_sup = p.pay_sup,
+        meal_sup = p.meal_sup,
+        house_sup = p.house_sup,
+        item1_use = p.item1_use,
+        item1_type = p.item1_type,
+        item1_sup = p.item1_sup,
+        item2_use = p.item2_use,
+        item2_type = p.item2_type,
+        item2_sup = p.item2_sup,
+        item3_use = p.item3_use,
+        item3_type = p.item3_type,
+        item3_sup = p.item3_sup,
+        item4_use = p.item4_use,
+        item4_type = p.item4_type,
+        item4_sup = p.item4_sup,
+        agent = p.agent,
     )
 
 
@@ -938,6 +1119,35 @@ def update_post(
         province=post.province,
         city=post.city,
         status=post.status,
+        highlight_color = post.highlight_color,
+        highlight_content = post.highlight_content,
+        total_use = post.total_use,
+        branch_use = post.branch_use,
+        leader_use = post.leader_use,
+        member_use = post.member_use,
+        total_fee = post.total_fee,
+        branch_fee = post.branch_fee,
+        leader_fee = post.leader_fee,
+        member_fee = post.member_fee,
+        pay_use = post.pay_use,
+        meal_use = post.meal_use,
+        house_use = post.house_use,
+        pay_sup = post.pay_sup,
+        meal_sup = post.meal_sup,
+        house_sup = post.house_sup,
+        item1_use = post.item1_use,
+        item1_type = post.item1_type,
+        item1_sup = post.item1_sup,
+        item2_use = post.item2_use,
+        item2_type = post.item2_type,
+        item2_sup = post.item2_sup,
+        item3_use = post.item3_use,
+        item3_type = post.item3_type,
+        item3_sup = post.item3_sup,
+        item4_use = post.item4_use,
+        item4_type = post.item4_type,
+        item4_sup = post.item4_sup,
+        agent = post.agent,
     )
 
 
