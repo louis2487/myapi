@@ -1085,10 +1085,10 @@ def update_post(
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(post, key, value)
 
-    if body.business_address is not None:
-        province, city = split_address(body.business_address)
-        post.province = province
-        post.city = city
+    # if body.business_address is not None:
+    #     province, city = split_address(body.business_address)
+    #     post.province = province
+    #     post.city = city
 
     db.commit()
     db.refresh(post)
