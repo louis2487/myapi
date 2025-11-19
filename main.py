@@ -1156,8 +1156,8 @@ def update_post(
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
-        post_type=p.post_type,
-        card_type=p.card_type,   
+        post_type=post.post_type,
+        card_type=post.card_type,   
     )
 
 
