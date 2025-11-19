@@ -918,7 +918,9 @@ def list_posts(
     status: Optional[str] = Query(None, description="published | closed"),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Community_Post).order_by(Community_Post.created_at.desc())
+    q = db.query(Community_Post)
+          .filter(Community_Post.post_type == 1)
+          .order_by(Community_Post.created_at.desc())
 
     if status in ("published", "closed"):
         q = q.filter(Community_Post.status == status)
@@ -1011,6 +1013,113 @@ def list_posts(
 
     next_cursor = rows[-1].created_at.isoformat() if rows else None
     return PostsOut2(items=items, next_cursor=next_cursor)
+
+
+@app.get("/community/posts/{post_type}", response_model=PostsOut2)
+def list_posts_plus(
+    post_type: int,
+    username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명"),
+    cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
+    limit: int = Query(1000, ge=1, le=1000),
+    status: Optional[str] = Query(None, description="published | closed"),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Community_Post)
+          .filter(Community_Post.post_type == post_type)
+          .order_by(Community_Post.created_at.desc())
+
+    if status in ("published", "closed"):
+        q = q.filter(Community_Post.status == status)
+
+    if cursor:
+        try:
+            cur_dt = datetime.fromisoformat(cursor)
+            q = q.filter(Community_Post.created_at < cur_dt)
+        except Exception:
+            pass
+
+    rows = q.limit(limit).all()
+
+    liked_ids = set()
+    if username and rows:
+        post_ids = [p.id for p in rows]
+        
+        liked_rows = (
+            db.query(Post_Like.post_id)
+              .filter(Post_Like.username == username, Post_Like.post_id.in_(post_ids))
+              .all()
+        )
+        liked_ids = {pid for (pid,) in liked_rows}
+
+    items = [
+        PostOut2(
+            id=p.id,
+            author=PostAuthor(id=p.author.id, username=p.author.username),
+            title=p.title,
+            content=p.content,
+            image_url=p.image_url,
+            created_at=p.created_at,
+            contract_fee=p.contract_fee,
+            workplace_address=p.workplace_address,
+            workplace_map_url=p.workplace_map_url,
+            business_address=p.business_address,
+            business_map_url=p.business_map_url,
+            workplace_lat=p.workplace_lat,
+            workplace_lng=p.workplace_lng,
+            business_lat=p.business_lat,
+            business_lng=p.business_lng,
+            job_industry=p.job_industry,
+            job_category=p.job_category,
+            pay_support=p.pay_support,
+            meal_support=p.meal_support,
+            house_support=p.house_support,
+            company_developer=p.company_developer,
+            company_constructor=p.company_constructor,
+            company_trustee=p.company_trustee,
+            company_agency=p.company_agency,
+            agency_call=p.agency_call,
+            province=p.province,
+            city=p.city,
+            status=p.status,
+            liked=(p.id in liked_ids),
+            highlight_color = p.highlight_color,
+            highlight_content = p.highlight_content,
+            total_use = p.total_use,
+            branch_use = p.branch_use,
+            leader_use = p.leader_use,
+            member_use = p.member_use,
+            total_fee = p.total_fee,
+            branch_fee = p.branch_fee,
+            leader_fee = p.leader_fee,
+            member_fee = p.member_fee,
+            pay_use = p.pay_use,
+            meal_use = p.meal_use,
+            house_use = p.house_use,
+            pay_sup = p.pay_sup,
+            meal_sup = p.meal_sup,
+            house_sup = p.house_sup,
+            item1_use = p.item1_use,
+            item1_type = p.item1_type,
+            item1_sup = p.item1_sup,
+            item2_use = p.item2_use,
+            item2_type = p.item2_type,
+            item2_sup = p.item2_sup,
+            item3_use = p.item3_use,
+            item3_type = p.item3_type,
+            item3_sup = p.item3_sup,
+            item4_use = p.item4_use,
+            item4_type = p.item4_type,
+            item4_sup = p.item4_sup,
+            agent = p.agent,
+            post_type=p.post_type,
+            card_type=p.card_type,   
+        )
+        for p in rows
+    ]
+
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return PostsOut2(items=items, next_cursor=next_cursor)
+
 
 
 @app.get("/community/posts/{post_id}", response_model=PostOut)
