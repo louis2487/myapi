@@ -145,7 +145,9 @@ class Community_Post(Base):
     item4_use = Column(Boolean)  
     item4_type = Column(String(255))
     item4_sup = Column(String(255)) 
-    agent = Column(String(255))               
+    agent = Column(String(255))
+    post_type= Column(DOUBLE_PRECISION, nullable=True)   
+    card_type= Column(DOUBLE_PRECISION, nullable=True)                 
 
     author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
     comments = relationship("Community_Comment", back_populates="post", cascade="all, delete-orphan")

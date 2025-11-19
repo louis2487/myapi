@@ -559,7 +559,8 @@ class PostCreate(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
-   
+    post_type: Optional[float] = None
+    card_type: Optional[float] = None
 
 class PostAuthor(BaseModel):
     id: int
@@ -623,6 +624,8 @@ class PostOut(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
+    post_type: Optional[float] = None
+    card_type: Optional[float] = None
     
     
 
@@ -685,7 +688,8 @@ class PostOut2(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
- 
+    post_type: Optional[float] = None
+    card_type: Optional[float] = None
 
 class PostsOut(BaseModel):
     items: List[PostOut]
@@ -748,6 +752,8 @@ class PostUpdate(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
+    post_type: Optional[float] = None
+    card_type: Optional[float] = None
 
 #--------------------Comments update-----------------------
 class CommentCreate(BaseModel):
@@ -829,12 +835,10 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_type = body.item4_type,
         item4_sup = body.item4_sup,
         agent = body.agent,
+        post_type=body.post_type,
+        card_type=body.card_type,
     )
-    # if body.business_address:
-    #     province, city = split_address(body.business_address)
-    #     post.province = province
-    #     post.city     = city
-
+   
     db.add(post)
     db.commit()
     db.refresh(post)
@@ -897,6 +901,8 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
+        post_type=post.post_type,
+        card_type=post.card_type,
     )
 
 class PostsOut2(BaseModel):
@@ -996,7 +1002,9 @@ def list_posts(
             item4_use = p.item4_use,
             item4_type = p.item4_type,
             item4_sup = p.item4_sup,
-            agent = p.agent,   
+            agent = p.agent,
+            post_type=p.post_type,
+            card_type=p.card_type,   
         )
         for p in rows
     ]
@@ -1069,6 +1077,8 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         item4_type = p.item4_type,
         item4_sup = p.item4_sup,
         agent = p.agent,
+        post_type=p.post_type,
+        card_type=p.card_type,
     )
 
 
@@ -1084,11 +1094,6 @@ def update_post(
   
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(post, key, value)
-
-    # if body.business_address is not None:
-    #     province, city = split_address(body.business_address)
-    #     post.province = province
-    #     post.city = city
 
     db.commit()
     db.refresh(post)
@@ -1151,6 +1156,8 @@ def update_post(
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
+        post_type=p.post_type,
+        card_type=p.card_type,   
     )
 
 
@@ -1210,17 +1217,17 @@ def upload_base64(payload: UploadBase64Request):
     return {"url": public_url}
 
 
-@app.post("/community/posts/{post_id}/comments", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
+@app.post("/community/posts/{post_id}/comments/{username}", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
 def create_comment(
     post_id: int,
     payload: CommentCreate,
     db: Session = Depends(get_db),
-    user=Depends(get_current_community_user),
 ):
+    userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
     comment = Community_Comment(
         post_id=post_id, 
-        user_id=user.id, 
-        username=user.username,
+        user_id=userId, 
+        username=username,
         content=payload.content    
     )
     db.add(comment)
@@ -1248,11 +1255,9 @@ def list_comments(
     next_cur = items[-1].created_at.isoformat() if len(rows) > limit else None
     return CommentListOut(items=items, next_cursor=next_cur)
 
-@app.get("/community/users/export")
-def export_users(db: Session = Depends(get_db), user=Depends(get_current_community_user)):
-    if user.username != "Admin":
-        raise HTTPException(403, "관리자만 접근 가능")
 
+@app.get("/community/users/export")
+def export_users(db: Session = Depends(get_db)):
     users = db.query(Community_User).all()
 
     wb = openpyxl.Workbook()
