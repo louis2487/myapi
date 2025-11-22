@@ -927,8 +927,6 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         business_lng = body.business_lng,
         job_industry=body.job_industry,
         job_category=body.job_category,
-        province = body.province,
-        city= body.city,
         pay_support=body.pay_support,
         meal_support=body.meal_support,
         house_support=body.house_support,
