@@ -536,13 +536,13 @@ def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get
 
         user.username = new_username
 
-   if req.password is not None:
+    if req.password is not None:
         if req.passwordconfirm is None:
             return {"status": 3}  
 
         if req.password != req.passwordconfirm:
             return {"status": 4}  
-            
+
         user.password_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
     if req.name is not None:
