@@ -504,6 +504,7 @@ def get_user(username: str, db: Session = Depends(get_db)):
 class UserUpdateRequest(BaseModel):
     username: str | None = Field(default=None, min_length=2, max_length=50)  # 새 아이디
     password: str | None = Field(default=None, min_length=2, max_length=255)
+    passwordconfirm: str | None = Field(default=None, min_length=2, max_length=255)
     name: str | None = Field(default=None, max_length=50)       # 실명
     phone_number: str | None = Field(default=None, max_length=20)
     region: str | None = Field(default=None, max_length=100)
@@ -535,7 +536,13 @@ def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get
 
         user.username = new_username
 
-    if req.password is not None:
+   if req.password is not None:
+        if req.passwordconfirm is None:
+            return {"status": 3}  
+
+        if req.password != req.passwordconfirm:
+            return {"status": 4}  
+            
         user.password_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
     if req.name is not None:
