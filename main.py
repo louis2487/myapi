@@ -449,18 +449,20 @@ def get_current_community_user(
 class SignupRequest_C(BaseModel):
     username: str = Field(min_length=2, max_length=50)
     password: str = Field(min_length=2, max_length=255)
+    password_confirm: str = Field(min_length=2, max_length=255)
     name: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
-    position: str | None = Field(default=None, max_length=50)
     region: str | None = Field(default=None, max_length=100)
-    signup_date: date | None = Field(default=None)
-   
 
+   
 @app.post("/community/signup")
 def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
 
     if db.query(Community_User).filter(Community_User.username == req.username).first():
-        raise HTTPException(400,  "Username already taken")
+        return {"status": 1} 
+
+    if req.password != req.password_confirm:
+        return {"status": 2} 
 
     pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
@@ -469,15 +471,140 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         password_hash = pw_hash,
         name          = req.name,
         phone_number  = req.phone_number,
-        position      = req.position,
         region        = req.region,  
-        signup_date   = req.signup_date,
+        signup_date   = date.today(), 
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    return {"status":"ok", "user_id": user.id}
+    return {"status": 0}
+
+
+@app.get("/community/user/{username}")
+def get_user(username: str, db: Session = Depends(get_db)):
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+
+    if not user:
+        return {"status": 1}   
+
+    return {
+        "status": 0,
+        "user": {
+            "username": username,
+            "name": user.name,
+            "phone_number": user.phone_number,
+            "region": user.region,
+            "signup_date": user.signup_date,
+        }
+    }
+
+
+class UserUpdateRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=2, max_length=50)  # 새 아이디
+    password: str | None = Field(default=None, min_length=2, max_length=255)
+    name: str | None = Field(default=None, max_length=50)       # 실명
+    phone_number: str | None = Field(default=None, max_length=20)
+    region: str | None = Field(default=None, max_length=100)
+
+
+@app.put("/community/user/{username}")
+def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get_db)):
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+
+    if not user:
+        return {"status": 1}  
+
+    if req.username is not None and req.username != username:
+        new_username = req.username
+
+        exists = db.query(Community_User).filter(Community_User.username == new_username).first()
+        if exists:
+            return {"status": 2}  
+
+        old_username = username
+
+        db.query(Post_Like).filter(
+            Post_Like.username == old_username
+        ).update(
+            {"username": new_username},
+            synchronize_session=False
+        )
+
+        user.username = new_username
+
+    if req.password is not None:
+        user.password_hash = hashlib.sha256(req.password.encode()).hexdigest()
+
+    if req.name is not None:
+        user.name = req.name
+
+    if req.phone_number is not None:
+        user.phone_number = req.phone_number
+
+    if req.region is not None:
+        user.region = req.region
+
+
+    db.commit()
+    db.refresh(user)
+
+    return {"status": 0}
+
+
+@app.delete("/community/user/{username}")
+def delete_user(username: str, db: Session = Depends(get_db)):
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+
+    if not user:
+        return {"status": 1}   
+
+    db.delete(user)
+    db.commit()
+
+    return {"status": 0}
+
+@app.get("/community/mypage/{username}")
+def get_mypage(username: str, db: Session = Depends(get_db)):
+
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .first()
+    )
+
+    if not user:
+        return {"status": 1}  
+
+    rows = (
+        db.query(
+            Community_Post.post_type,
+            func.count(Community_Post.id).label("cnt"),
+        )
+        .filter(
+            Community_Post.user_id == user.id,
+            Community_Post.post_type.in_([1, 3, 4]),
+        )
+        .group_by(Community_Post.post_type)
+        .all()
+    )
+
+    counts = {1: 0, 3: 0, 4: 0}
+    for post_type, cnt in rows:
+        counts[post_type] = cnt
+
+    return {
+        "status": 0,
+        "signup_date": user.signup_date,  
+        "posts": {
+            "type1": counts[1],
+            "type3": counts[3],
+            "type4": counts[4],
+        },
+    }
 
 
 @app.post("/community/login", response_model=LoginResponse)

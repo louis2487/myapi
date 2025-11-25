@@ -81,7 +81,6 @@ class Community_User(Base):
     password_hash = Column(String(255), nullable=False)
     name          = Column(String(50),  nullable=True)
     phone_number  = Column(String(20),  nullable=True)  
-    position      = Column(String(50),  nullable=True)   
     region        = Column(String(100), nullable=True)
     signup_date = Column(Date, nullable=True, default=date.today)
    
