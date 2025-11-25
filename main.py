@@ -558,7 +558,7 @@ def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get
     db.commit()
     db.refresh(user)
 
-    return {"status": 0}
+    return {"status": 0, "username" : user.username}
 
 
 @app.delete("/community/user/{username}")
