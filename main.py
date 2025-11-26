@@ -892,6 +892,7 @@ class PostUpdate(BaseModel):
 #--------------------Comments update-----------------------
 class CommentCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
+    parent_id: Optional[int] = None
 
 class CommentOut(BaseModel):
     id: int
@@ -900,6 +901,8 @@ class CommentOut(BaseModel):
     username: str
     content: str
     created_at: datetime
+    parent_id: Optional[int] = None
+    is_deleted: bool
     class Config: from_attributes = True
 
 class CommentListOut(BaseModel):
@@ -1704,24 +1707,46 @@ def upload_base64(payload: UploadBase64Request):
     return {"url": public_url}
 
 
-@app.post("/community/posts/{post_id}/comments/{username}", response_model=CommentOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+ "/community/posts/{post_id}/comments/{username}",
+    response_model=CommentOut,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_comment(
     username: str,
     post_id: int,
     payload: CommentCreate,
     db: Session = Depends(get_db),
 ):
-    userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
+    user_id = db.query(Community_User.id).filter(Community_User.username == username).scalar()
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    parent_id = payload.parent_id
+    if parent_id is not None:
+        parent = (
+            db.query(Community_Comment)
+            .filter(
+                Community_Comment.id == parent_id,
+                Community_Comment.post_id == post_id,
+            )
+            .first()
+        )
+        if parent is None:
+            raise HTTPException(status_code=400, detail="Invalid parent comment")
+
     comment = Community_Comment(
-        post_id=post_id, 
-        user_id=userId, 
+        post_id=post_id,
+        user_id=user_id,
         username=username,
-        content=payload.content    
+        content=payload.content,
+        parent_id=parent_id,
     )
     db.add(comment)
     db.commit()
     db.refresh(comment)
     return comment
+
 
 
 @app.get("/community/posts/{post_id}/comments", response_model=CommentListOut)
@@ -1732,15 +1757,23 @@ def list_comments(
     db: Session = Depends(get_db),
 ):
     q = db.query(Community_Comment).filter(Community_Comment.post_id == post_id)
+
     if cursor:
         try:
             dt = datetime.fromisoformat(cursor)
             q = q.filter(Community_Comment.created_at < dt)
         except Exception:
             pass
-    rows = q.order_by(Community_Comment.created_at.desc(), Community_Comment.id.desc()).limit(limit + 1).all()
+
+    rows = (
+        q.order_by(Community_Comment.created_at.desc(), Community_Comment.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+
     items = rows[:limit]
     next_cur = items[-1].created_at.isoformat() if len(rows) > limit else None
+
     return CommentListOut(items=items, next_cursor=next_cur)
 
 
@@ -1752,7 +1785,7 @@ def export_users(db: Session = Depends(get_db)):
     ws = wb.active
     ws.title = "Users"
 
-    ws.append(["ID", "Username", "Name", "Phone", "Position", "Region", "Signup Date"])
+    ws.append(["ID", "Username", "Name", "Phone", "Region", "Signup Date"])
 
     for u in users:
         ws.append([u.id, u.username, u.name, u.phone_number, u.position, u.region, u.signup_date])
@@ -1761,6 +1794,55 @@ def export_users(db: Session = Depends(get_db)):
     wb.save(tmp.name)
 
     return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
+
+
+class CommentUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
+@app.put("/community/comments/{comment_id}/{username}", response_model=CommentOut)
+def update_comment(
+    comment_id: int,
+    username: str,
+    payload: CommentUpdate,
+    db: Session = Depends(get_db),
+):
+    comment = db.query(Community_Comment).filter(Community_Comment.id == comment_id).first()
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.username != username:
+        raise HTTPException(status_code=403, detail="No permission to edit this comment")
+
+    if comment.is_deleted:
+        raise HTTPException(status_code=400, detail="Already deleted comment")
+
+    comment.content = payload.content
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.delete("/community/comments/{comment_id}/{username}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_comment(
+    comment_id: int,
+    username: str,
+    db: Session = Depends(get_db),
+):
+    comment = db.query(Community_Comment).filter(Community_Comment.id == comment_id).first()
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    if comment.username != username:
+        raise HTTPException(status_code=403, detail="No permission to delete this comment")
+
+    if comment.is_deleted:
+        return
+
+    comment.is_deleted = True
+    comment.deleted_at = datetime.now(timezone.utc)
+    comment.content = "[삭제된 댓글입니다.]"
+    db.commit()
 
 
 @app.post("/community/posts/{post_id}/like/{username}")

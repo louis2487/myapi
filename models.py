@@ -159,7 +159,9 @@ class Community_Comment(Base):
     username = Column(String(50), nullable=False, index=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    
+    parent_id = Column(BigInteger, ForeignKey("community_comments.id", ondelete="CASCADE"), nullable=True, index=True)
+    is_deleted = Column(Boolean, nullable=False, server_default="false")
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     post = relationship("Community_Post", back_populates="comments", lazy="joined")
     user = relationship("Community_User", lazy="joined")
