@@ -29,6 +29,7 @@ bearer = HTTPBearer(auto_error=True)
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+SECRET_RSS_TOKEN = "rss-secret-token"
 
 def get_db():
     db = SessionLocal()
@@ -1945,3 +1946,14 @@ async def get_liked_posts(
     ]
 
     return {"items": posts, "next_cursor": next_cursor}
+
+
+
+@app.get("/internal/rss-refresh")
+def rss_refresh(x_internal_token: str = Header(None), db: Session = Depends(get_db)):
+
+    if x_internal_token != SECRET_RSS_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    fetch_rss_and_save(db)
+    return {"status": "ok"}
