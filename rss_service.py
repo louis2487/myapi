@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from models import Community_Post
 
-RSS_URL = "https://www.mk.co.kr/rss/50300009/"
+RSS_URL = "https://www.mk.co.kr/rss/30100041/"
 
 def parse_pubdate(pub_date: str) -> datetime:
     try:
