@@ -25,6 +25,8 @@ def fetch_rss_and_save(db: Session):
         link = (item.find("link").text or "").strip()
         pub_date_str = (item.find("pubDate").text or "").strip()
         pub_date = parse_pubdate(pub_date_str)
+        summary = (item.find("description").text or "").strip()
+        content=summary
 
         exists = db.query(Community_Post).filter(Community_Post.agent == link).first()
         if exists:
@@ -35,7 +37,8 @@ def fetch_rss_and_save(db: Session):
             agent=link,
             created_at=pub_date,
             user_id=1,
-            post_type=2
+            post_type=2,
+            content=summary
         )
 
         db.add(post)
