@@ -466,6 +466,15 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     if req.password != req.password_confirm:
         return {"status": 2} 
 
+    if req.name is None:
+        return {"status": 3}
+
+    if req.phone_number is None:
+        return {"status": 4}
+
+    if req.region is None:
+        return {"status": 3}    
+
     pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
     user = Community_User(
