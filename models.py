@@ -83,7 +83,7 @@ class Community_User(Base):
     phone_number  = Column(String(20),  nullable=True)  
     region        = Column(String(100), nullable=True)
     signup_date = Column(Date, nullable=True, default=date.today)
-   
+    push_token = Column(String(255), nullable=True)
 
 class Community_Post(Base):
     __tablename__ = "community_posts"
