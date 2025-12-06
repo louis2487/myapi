@@ -2094,7 +2094,7 @@ def notify_my(username: str, req: MyNotifyRequest, db: Session = Depends(get_db)
 def get_unread_notifications(username: str, db: Session = Depends(get_db)):
     user_id = get_user_id_by_username(db, username)
 
-   rows = (
+    rows = (
         db.query(Notification)
         .filter(
         Notification.user_id == user_id,
@@ -2110,14 +2110,14 @@ def get_unread_notifications(username: str, db: Session = Depends(get_db)):
 def unread_count_by_username(username: str, db: Session = Depends(get_db)):
     user_id = get_user_id_by_username(db, username)
 
-   count = (
+    count = (
         db.query(Notification)
         .filter(
             Notification.user_id == user_id,
             Notification.is_read == False
         )
         .count()
-)
+    )
 
     return {"unread_count": count}
 
