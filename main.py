@@ -52,6 +52,10 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class LoginRequest2(BaseModel):
+    username: str
+    password: str
     push_token: str | None = None
 
 class LoginResponse(BaseModel):
@@ -156,9 +160,6 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if user.password_hash != pw_hash:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    user.push_token = req.push_token
-    db.commit()
-    
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -631,7 +632,7 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
 
 
 @app.post("/community/login", response_model=LoginResponse)
-def community_login(req: LoginRequest, db: Session = Depends(get_db)):
+def community_login(req: LoginRequest2, db: Session = Depends(get_db)):
 
     user = db.query(Community_User).filter(Community_User.username == req.username).first()
     
