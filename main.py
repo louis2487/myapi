@@ -2066,37 +2066,6 @@ def send_push(token, title, body, data=None):
 
 
 @app.post("/notify/my/{username}")
-def create_notify_for_user(username: str, req: MyNotifyRequest, db: Session = Depends(get_db)):
-
-    user_id = get_user_id_by_username(db, username)
-    user_id = user.id
-
-    noti = create_notification(
-        db=db,
-        user_id=user_id,
-        title=req.title,
-        body=req.body,
-        type=req.type,
-        data=req.data or {}
-    )
-
-    token_row = db.execute(
-        "SELECT push_token FROM community_users WHERE id = :uid",
-        {"uid": user_id}
-    ).fetchone()
-
-    if token_row and token_row[0]:
-        send_push(
-            token_row[0],
-            req.title,
-            req.body,
-            req.data or {}
-        )
-
-    return {"status": "ok", "id": noti.id}
-
-
-@app.post("/notify/my/{username}")
 def notify_my(username: str, req: MyNotifyRequest, db: Session = Depends(get_db)):
 
     user_id = get_user_id_by_username(db, username)
