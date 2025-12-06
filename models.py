@@ -178,3 +178,21 @@ class Post_Like(Base):
         Index("ix_post_likes_user_created", "username", "created_at"),
         Index("ix_post_likes_post", "post_id"),
     )
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False)
+    user = relationship("Community_User")  
+
+    type = Column(String(50), nullable=True)            
+    title = Column(Text, nullable=True)
+    body = Column(Text, nullable=True)
+
+    data = Column(JSON, nullable=True)                  
+
+    is_read = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)

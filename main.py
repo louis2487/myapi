@@ -1121,6 +1121,35 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     db.commit()
     db.refresh(post)
 
+    if post_type == 3:
+        target_user_id = 1  
+
+    title = "새 수다글이 등록되었습니다"
+    body = f"{username}님이 새로운 수다글을 작성했습니다: {post.title}"
+
+    
+    noti = create_notification(
+        db,
+        user_id=target_user_id,   
+        title=title,
+        body=body,
+        type="post",
+        data={"post_id": post.id, "post_type": 3}
+    )
+
+    token_row = db.execute(
+        "SELECT push_token FROM community_users WHERE id = :uid",
+        {"uid": target_user_id}
+    ).fetchone()
+
+    if token_row and token_row[0]:
+        send_push(
+            token_row[0],
+            title,
+            body,
+            {"post_id": post.id, "post_type": 3}
+        )
+
     return PostOut(
         id=post.id,
         author=PostAuthor(id=userId, username=username),
@@ -1967,3 +1996,106 @@ def rss_refresh(x_internal_token: str = Header(None), db: Session = Depends(get_
 
     fetch_rss_and_save(db)
     return {"status": "ok"}
+
+
+
+def create_notification(
+    db: Session,
+    user_id: int,
+    title: str,
+    body: str,
+    type: str = "system",
+    data: dict = None
+):
+    noti = Notification(
+        user_id=user_id,
+        title=title,
+        body=body,
+        type=type,
+        data=data or {}
+    )
+    db.add(noti)
+    db.commit()
+    db.refresh(noti)
+    return noti
+
+@app.get("/notifications")
+def get_notifications(user=Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.query(Notification)\
+        .filter(Notification.user_id == user.id)\
+        .order_by(Notification.id.desc())\
+        .all()
+    return rows
+
+
+@app.post("/notifications/read")
+def read_notification(req: NotificationReadRequest,
+                      user=Depends(current_user),
+                      db: Session = Depends(get_db)):
+    db.query(Notification).filter(
+        Notification.id == req.id,
+        Notification.user_id == user.id
+    ).update({"is_read": True})
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/notifications/unread")
+def unread_count(user=Depends(current_user), db: Session = Depends(get_db)):
+    count = db.query(Notification).filter(
+        Notification.user_id == user.id,
+        Notification.is_read == False
+    ).count()
+    return {"unread_count": count}
+
+
+@app.post("/admin/notify")
+def admin_notify(req: AdminNotifyRequest,
+                 admin=Depends(require_admin),
+                 db: Session = Depends(get_db)):
+
+    noti = create_notification(
+        db,
+        user_id=req.user_id,
+        title=req.title,
+        body=req.body,
+        type=req.type,
+        data=req.data
+    )
+
+    token_row = db.execute(
+        "SELECT push_token FROM community_users WHERE id = :uid",
+        {"uid": req.user_id}
+    ).fetchone()
+
+    if token_row and token_row[0]:
+        send_push(token_row[0], req.title, req.body, req.data)
+
+    return {"status": "ok", "notification_id": noti.id}
+
+
+class AdminNotifyRequest(BaseModel):
+    user_id: int
+    title: str
+    body: str
+    type: str = "admin"
+    data: dict = {}
+
+
+import requests
+
+def send_push(token, title, body, data=None):
+    message = {
+        "to": token,
+        "sound": "default",
+        "title": title,
+        "body": body,
+        "data": data or {}
+    }
+
+    requests.post(
+        "https://exp.host/--/api/v2/push/send",
+        json=message,
+        headers={"Content-Type": "application/json"}
+    )
+
