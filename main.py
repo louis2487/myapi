@@ -156,6 +156,9 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if user.password_hash != pw_hash:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    user.push_token = req.push_token
+    db.commit()
+    
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = jwt.encode({"sub": str(user.id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
