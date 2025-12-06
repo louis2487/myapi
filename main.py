@@ -2008,12 +2008,8 @@ def create_notification(
 
 
 def get_user_id_by_username(db: Session, username: str):
-   user_id = (
-        db.query(Community_User.id)
-        .filter(Community_User.username == username)
-        .scalar()
-    )
-
+    user_id = db.query(Community_User.id).filter(Community_User.username == username).scalar()
+    
     if user_id is None:
         raise HTTPException(status_code=404, detail="User not found")
 
