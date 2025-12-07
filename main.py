@@ -1138,6 +1138,15 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
             body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
             post_id=post.id,
             post_type=3
+            target_user_id=1
+        )
+        notify_admin_post(
+            db,
+            title="새 수다글이 등록되었습니다",
+            body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
+            post_id=post.id,
+            post_type=3
+            target_user_id=10
         )
 
     return PostOut(
@@ -2025,9 +2034,7 @@ def get_user_id_by_username(db: Session, username: str):
     return user_id
 
 
-def notify_admin_post(db: Session, title: str, body: str, post_id: int, post_type: int = 3):
-    target_user_id = 1
-
+def notify_admin_post(db: Session, title: str, body: str, post_id: int, post_type: int = 3, target_user_id: int):
     noti = create_notification(
         db,
         user_id=target_user_id,
