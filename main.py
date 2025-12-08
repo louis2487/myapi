@@ -2044,14 +2044,11 @@ def notify_admin_post(db: Session, title: str, body: str, post_id: int, target_u
         data={"post_id": post_id, "post_type": post_type}
     )
 
-    token_row = db.execute(
-        "SELECT push_token FROM community_users WHERE id = :uid",
-        {"uid": target_user_id}
-    ).fetchone()
+    user = db.query(Community_User).filter(Community_User.id == target_user_id).first()
 
-    if token_row and token_row[0]:
+    if user and user.push_token:
         send_push(
-            token_row[0],
+            user.push_token,
             title,
             body,
             {"post_id": post_id, "post_type": post_type}
@@ -2071,11 +2068,15 @@ def send_push(token, title, body, data=None, badge=1):
         "priority":"high",
     }
 
-    requests.post(
+    resp = requests.post(
         "https://exp.host/--/api/v2/push/send",
         json=message,
         headers={"Content-Type": "application/json"}
     )
+    try:
+        print("Expo push response:", resp.json())
+    except:
+        print("Push response parse failed:", resp.text)
 
 
 @app.post("/notify/my/{username}")
