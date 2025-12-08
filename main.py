@@ -2066,6 +2066,7 @@ def send_push(token, title, body, data=None, badge=1):
         "data": data or {},
         "badge":badge,
         "priority":"high",
+        "channelId": "default",
     }
 
     resp = requests.post(
