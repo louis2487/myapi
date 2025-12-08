@@ -2060,13 +2060,15 @@ def notify_admin_post(db: Session, title: str, body: str, post_id: int, target_u
     return noti
 
 
-def send_push(token, title, body, data=None):
+def send_push(token, title, body, data=None, badge=1):
     message = {
         "to": token,
         "sound": "default",
         "title": title,
         "body": body,
-        "data": data or {}
+        "data": data or {},
+        "badge":badge,
+        "priority":"high",
     }
 
     requests.post(
