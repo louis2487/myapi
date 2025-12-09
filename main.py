@@ -1441,22 +1441,24 @@ def list_my_posts_by_type(
     status: Optional[str] = Query(None, description="published | closed"),
     db: Session = Depends(get_db),
 ):
+    user_id = get_user_id_by_username(db, username)
     q = (
         db.query(Community_Post)
-          .filter(Community_Post.post_type == post_type)
-          .filter(Community_Post.author.has(username=username)) 
-          .order_by(Community_Post.created_at.desc())
+        .filter(Community_Post.post_type == post_type)
+        .order_by(Community_Post.created_at.desc())
     )
+
+    super_users = {1, 10, 13}
+    
+    if user_id not in super_users:
+        q = q.filter(Community_Post.user_id == user_id)
+
 
     if status in ("published", "closed"):
         q = q.filter(Community_Post.status == status)
-
+    
     if cursor:
-        try:
-            cur_dt = datetime.fromisoformat(cursor)
-            q = q.filter(Community_Post.created_at < cur_dt)
-        except Exception:
-            pass
+        q = q.filter(Community_Post.created_at < cursor)
 
     rows = q.limit(limit).all()
 
