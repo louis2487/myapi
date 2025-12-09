@@ -1448,7 +1448,7 @@ def list_my_posts_by_type(
         .order_by(Community_Post.created_at.desc())
     )
 
-    super_users = {1, 10, 13}
+    super_users = {1, 10, 13, 20, 21, 22, 23, 24, 25, 26, 27, 28}
     
     if user_id not in super_users:
         q = q.filter(Community_Post.user_id == user_id)
