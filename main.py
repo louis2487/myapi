@@ -1132,23 +1132,17 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     db.refresh(post)
 
     if post_type == 3:
-        notify_admin_post(
-            db,
-            title="새 수다글이 등록되었습니다",
-            body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
-            post_id=post.id,
-            target_user_id=1,
-            post_type=3,
-        )
-        notify_admin_post(
-            db,
-            title="새 수다글이 등록되었습니다",
-            body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
-            post_id=post.id,
-            target_user_id=10,
-            post_type=3,
-        )
+        admin_ids = [1, 10, 13, 20, 21, 22, 23, 24, 25, 26, 27, 28]
 
+        for admin_id in admin_ids:
+            notify_admin_post(
+                db,
+                title="새 수다글이 등록되었습니다",
+                body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
+                post_id=post.id,
+                target_user_id=admin_id,
+                post_type=3,
+            )
     return PostOut(
         id=post.id,
         author=PostAuthor(id=userId, username=username),
