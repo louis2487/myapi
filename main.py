@@ -526,24 +526,40 @@ class UserUpdateRequest(BaseModel):
     phone_number: str | None = Field(default=None, max_length=20)
     region: str | None = Field(default=None, max_length=100)
 
-
 @app.put("/community/user/{username}")
-def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get_db)):
-
-    user = db.query(Community_User).filter(Community_User.username == username).first()
+def update_user(
+    username: str,
+    req: UserUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    # 🔹 1. 기존 유저 조회
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .first()
+    )
 
     if not user:
-        return {"status": 1}  
+        return {"status": 1}  # 유저 없음
 
+    old_username = None
+
+    # 🔹 2. 닉네임 변경
     if req.username is not None and req.username != username:
         new_username = req.username
 
-        exists = db.query(Community_User).filter(Community_User.username == new_username).first()
+        # 중복 체크
+        exists = (
+            db.query(Community_User)
+            .filter(Community_User.username == new_username)
+            .first()
+        )
         if exists:
-            return {"status": 2}  
+            return {"status": 2}  # 닉네임 중복
 
         old_username = username
 
+        # 연관 테이블 username 업데이트 (현재는 Post_Like만)
         db.query(Post_Like).filter(
             Post_Like.username == old_username
         ).update(
@@ -555,12 +571,14 @@ def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get
 
     if req.password is not None:
         if req.password_confirm is None:
-            return {"status": 3}  
+            return {"status": 3} 
 
         if req.password != req.password_confirm:
             return {"status": 4}  
 
-        user.password_hash = hashlib.sha256(req.password.encode()).hexdigest()
+        user.password_hash = hashlib.sha256(
+            req.password.encode()
+        ).hexdigest()
 
     if req.name is not None:
         user.name = req.name
@@ -571,12 +589,14 @@ def update_user(username: str, req: UserUpdateRequest, db: Session = Depends(get
     if req.region is not None:
         user.region = req.region
 
-
     db.commit()
     db.refresh(user)
 
-    return {"status": 0, "username" : user.username}
-
+    return {
+        "status": 0,
+        "username": user.username,      
+        "old_username": old_username      
+    }
 
 @app.delete("/community/user/{username}")
 def delete_user(username: str, db: Session = Depends(get_db)):
