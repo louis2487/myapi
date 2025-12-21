@@ -559,15 +559,15 @@ def update_user(
 
         old_username = username
 
-        # 연관 테이블 username 업데이트 (현재는 Post_Like만)
-        db.query(Post_Like).filter(
-            Post_Like.username == old_username
-        ).update(
-            {"username": new_username},
-            synchronize_session=False
-        )
-
         user.username = new_username
+        db.flush()  
+
+        db.query(Post_Like).filter(
+        Post_Like.username == old_username
+        ).update(
+        {"username": new_username},
+        synchronize_session=False
+        )
 
     if req.password is not None:
         if req.password_confirm is None:
