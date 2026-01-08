@@ -84,6 +84,10 @@ class Community_User(Base):
     region        = Column(String(100), nullable=True)
     signup_date = Column(Date, nullable=True, default=date.today)
     push_token = Column(String(255), nullable=True)
+    point_balance = Column(BigInteger, nullable=False, server_default="0")
+    cash_balance = Column(BigInteger, nullable=False, server_default="0")
+    admin_acknowledged = Column(Boolean, nullable=False, server_default="false")
+    referral_code = Column(String(20), nullable=True)
 
 class Community_Post(Base):
     __tablename__ = "community_posts"

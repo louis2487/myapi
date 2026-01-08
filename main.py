@@ -522,6 +522,9 @@ def get_user(username: str, db: Session = Depends(get_db)):
     if not user:
         return {"status": 1}   
 
+    # signup_date를 문자열로 변환 (None이면 None 유지)
+    signup_date_str = user.signup_date.isoformat() if user.signup_date else None
+    
     return {
         "status": 0,
         "user": {
@@ -529,10 +532,10 @@ def get_user(username: str, db: Session = Depends(get_db)):
             "name": user.name,
             "phone_number": user.phone_number,
             "region": user.region,
-            "signup_date": user.signup_date,
-            "point_balance": user.point_balance or 0,
-            "cash_balance": user.cash_balance or 0,
-            "admin_acknowledged": user.admin_acknowledged or False,
+            "signup_date": signup_date_str,
+            "point_balance": user.point_balance if user.point_balance is not None else 0,
+            "cash_balance": user.cash_balance if user.cash_balance is not None else 0,
+            "admin_acknowledged": user.admin_acknowledged if user.admin_acknowledged is not None else False,
             "referral_code": user.referral_code,
         }
     }
@@ -660,17 +663,20 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
     for post_type, cnt in rows:
         counts[post_type] = cnt
 
+    # signup_date를 문자열로 변환 (None이면 None 유지)
+    signup_date_str = user.signup_date.isoformat() if user.signup_date else None
+    
     return {
         "status": 0,
-        "signup_date": user.signup_date,  
+        "signup_date": signup_date_str,
         "posts": {
             "type1": counts[1],
             "type3": counts[3],
             "type4": counts[4],
         },
-        "point_balance": user.point_balance or 0,
-        "cash_balance": user.cash_balance or 0,
-        "admin_acknowledged": user.admin_acknowledged or False,
+        "point_balance": user.point_balance if user.point_balance is not None else 0,
+        "cash_balance": user.cash_balance if user.cash_balance is not None else 0,
+        "admin_acknowledged": user.admin_acknowledged if user.admin_acknowledged is not None else False,
         "referral_code": user.referral_code,
     }
 
