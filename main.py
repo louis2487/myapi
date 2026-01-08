@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, Qu
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
 from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification
@@ -492,6 +493,21 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         signup_date   = date.today(), 
     )
     db.add(user)
+    
+    # referral_code 생성 및 할당
+    try:
+        assign_referral_code(db, user, req.phone_number)
+    except HTTPException:
+        db.rollback()
+        raise  # HTTPException은 그대로 전달
+    except Exception as e:
+        db.rollback()
+        print(f"[ERROR] referral_code 할당 중 예상치 못한 오류: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="회원가입 처리 중 오류가 발생했습니다"
+        )
+    
     db.commit()
     db.refresh(user)
 
@@ -514,6 +530,10 @@ def get_user(username: str, db: Session = Depends(get_db)):
             "phone_number": user.phone_number,
             "region": user.region,
             "signup_date": user.signup_date,
+            "point_balance": user.point_balance or 0,
+            "cash_balance": user.cash_balance or 0,
+            "admin_acknowledged": user.admin_acknowledged or False,
+            "referral_code": user.referral_code,
         }
     }
 
@@ -648,6 +668,10 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
             "type3": counts[3],
             "type4": counts[4],
         },
+        "point_balance": user.point_balance or 0,
+        "cash_balance": user.cash_balance or 0,
+        "admin_acknowledged": user.admin_acknowledged or False,
+        "referral_code": user.referral_code,
     }
 
 
@@ -1235,8 +1259,10 @@ class PostsOut2(BaseModel):
 def list_posts(
     username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명"),
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
-    limit: int = Query(1000, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=100),
     status: Optional[str] = Query(None, description="published | closed"),
+    province: Optional[str] = Query(None, description="지역 필터: 시/도"),
+    city: Optional[str] = Query(None, description="지역 필터: 시/군/구"),
     db: Session = Depends(get_db),
 ):
     q = (
@@ -1247,6 +1273,18 @@ def list_posts(
 
     if status in ("published", "closed"):
         q = q.filter(Community_Post.status == status)
+
+    # 지역 필터링 (서버 측)
+    if province and province != "전체":
+        q = q.filter(Community_Post.province == province)
+        if city and city != "전체":
+            # city 필터링 (정확히 일치하거나 부분 일치)
+            q = q.filter(
+                or_(
+                    Community_Post.city == city,
+                    Community_Post.city.like(f"%{city}%")
+                )
+            )
 
     if cursor:
         try:
@@ -1343,8 +1381,10 @@ def list_posts_plus(
     post_type: int,
     username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명"),
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
-    limit: int = Query(1000, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=100),
     status: Optional[str] = Query(None, description="published | closed"),
+    province: Optional[str] = Query(None, description="지역 필터: 시/도"),
+    city: Optional[str] = Query(None, description="지역 필터: 시/군/구"),
     db: Session = Depends(get_db),
 ):
     q = (
@@ -1355,6 +1395,18 @@ def list_posts_plus(
 
     if status in ("published", "closed"):
         q = q.filter(Community_Post.status == status)
+
+    # 지역 필터링 (서버 측)
+    if province and province != "전체":
+        q = q.filter(Community_Post.province == province)
+        if city and city != "전체":
+            # city 필터링 (정확히 일치하거나 부분 일치)
+            q = q.filter(
+                or_(
+                    Community_Post.city == city,
+                    Community_Post.city.like(f"%{city}%")
+                )
+            )
 
     if cursor:
         try:
@@ -2039,6 +2091,115 @@ def create_notification(
     db.commit()
     db.refresh(noti)
     return noti
+
+
+def generate_referral_code(db: Session, phone_number: str) -> str:
+    """
+    phone_number 기반으로 referral_code를 생성합니다.
+    규칙: phone_number의 마지막 4자리 + 숫자(0~9) 1자리
+    
+    Args:
+        db: 데이터베이스 세션
+        phone_number: 전화번호 문자열
+        
+    Returns:
+        생성된 referral_code (5자리 문자열)
+        
+    Raises:
+        HTTPException: phone_number가 4자리 미만이거나, 모든 후보 코드가 사용 중인 경우
+    """
+    # 1. phone_number에서 숫자만 추출
+    digits_only = re.sub(r'[^0-9]', '', phone_number)
+    
+    # 2. 길이 확인
+    if len(digits_only) < 4:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"phone_number must contain at least 4 digits (got: {len(digits_only)})"
+        )
+    
+    # 3. 마지막 4자리 추출
+    last4 = digits_only[-4:]
+    
+    # 4. 이미 사용 중인 referral_code 조회 (last4로 시작하는 것들)
+    existing_codes = db.query(Community_User.referral_code).filter(
+        Community_User.referral_code.like(f"{last4}%"),
+        Community_User.referral_code.isnot(None)
+    ).all()
+    used_suffixes = {code[0][-1] for code in existing_codes if code[0] and len(code[0]) == 5}
+    
+    # 5. 사용 가능한 suffix 찾기 (0~9 중)
+    available_suffixes = [str(d) for d in range(10) if str(d) not in used_suffixes]
+    
+    if not available_suffixes:
+        # 모든 코드가 사용 중
+        masked_phone = phone_number[:3] + "****" + phone_number[-2:] if len(phone_number) > 5 else "****"
+        print(f"[ERROR] referral_code 생성 실패: last4={last4}, phone={masked_phone}, 모든 코드 소진")
+        raise HTTPException(
+            status_code=409,
+            detail="referral_code 생성 불가: 해당 전화번호 마지막 4자리로 생성 가능한 코드가 모두 사용 중입니다"
+        )
+    
+    # 6. 첫 번째 사용 가능한 suffix로 코드 생성
+    selected_suffix = available_suffixes[0]
+    referral_code = last4 + selected_suffix
+    
+    return referral_code
+
+
+def assign_referral_code(db: Session, user: Community_User, phone_number: str) -> None:
+    """
+    유저에게 referral_code를 할당합니다.
+    중복 발생 시 다른 suffix로 재시도합니다.
+    
+    Args:
+        db: 데이터베이스 세션
+        user: Community_User 객체
+        phone_number: 전화번호 문자열
+    """
+    digits_only = re.sub(r'[^0-9]', '', phone_number)
+    if len(digits_only) < 4:
+        raise HTTPException(
+            status_code=400,
+            detail="phone_number must contain at least 4 digits"
+        )
+    
+    last4 = digits_only[-4:]
+    
+    # 최대 10번 시도
+    max_attempts = 10
+    for attempt in range(max_attempts):
+        try:
+            # generate_referral_code가 최신 상태를 반영하므로 재호출
+            referral_code = generate_referral_code(db, phone_number)
+            user.referral_code = referral_code
+            db.flush()  # DB에 반영 (아직 commit은 안 함)
+            return  # 성공
+        except HTTPException as e:
+            # generate_referral_code에서 발생한 HTTPException은 그대로 전달
+            db.rollback()
+            raise
+        except IntegrityError:
+            # 동시성 문제로 인한 중복 발생 시 rollback 후 재시도
+            db.rollback()
+            # 다음 시도 전에 잠시 대기할 수도 있지만, 일단 바로 재시도
+            if attempt == max_attempts - 1:
+                # 마지막 시도 실패
+                masked_phone = phone_number[:3] + "****" + phone_number[-2:] if len(phone_number) > 5 else "****"
+                print(f"[ERROR] referral_code 할당 실패 (최대 시도 횟수 초과): last4={last4}, phone={masked_phone}")
+                raise HTTPException(
+                    status_code=409,
+                    detail="referral_code 생성 불가: 코드 생성에 실패했습니다 (동시성 충돌 또는 코드 소진)"
+                )
+            continue
+        except Exception as e:
+            db.rollback()
+            masked_phone = phone_number[:3] + "****" + phone_number[-2:] if len(phone_number) > 5 else "****"
+            print(f"[ERROR] referral_code 할당 중 예상치 못한 오류: last4={last4}, phone={masked_phone}, error={e}")
+            raise HTTPException(
+                status_code=500,
+                detail="referral_code 생성 중 오류가 발생했습니다"
+            )
 
 
 def get_user_id_by_username(db: Session, username: str):
