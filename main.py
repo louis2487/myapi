@@ -1013,6 +1013,8 @@ class PostCreate(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
     status: Optional[StatusLiteral] = "published"
     highlight_color: Optional[str] = None
     highlight_content: Optional[str] = None
@@ -1206,6 +1208,8 @@ class PostUpdate(BaseModel):
     company_trustee: Optional[str] = None
     company_agency: Optional[str] = None
     agency_call: Optional[str] = None
+    province: Optional[str] = None
+    city: Optional[str] = None
     status: Optional[StatusLiteral] = None
     highlight_color: Optional[str] = None
     highlight_content: Optional[str] = None
