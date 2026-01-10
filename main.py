@@ -669,6 +669,100 @@ def list_points(username: str, db: Session = Depends(get_db)):
     return {"status": 0, "items": items}
 
 
+ATTENDANCE_REASON = "attendance_daily"
+ATTENDANCE_AMOUNT = 200
+KST = timezone(timedelta(hours=9))
+
+
+def _kst_today_bounds_utc():
+    """
+    한국시간(KST) 기준 '오늘'의 시작/끝을 UTC datetime으로 반환.
+    """
+    now_kst = datetime.now(tz=KST)
+    start_kst = datetime.combine(now_kst.date(), datetime.min.time(), tzinfo=KST)
+    end_kst = start_kst + timedelta(days=1)
+    return start_kst.astimezone(timezone.utc), end_kst.astimezone(timezone.utc)
+
+
+@app.get("/community/points/attendance/status/{username}")
+def attendance_status(
+    username: str,
+    me: Community_User = Depends(get_current_community_user),
+    db: Session = Depends(get_db),
+):
+    """
+    출석체크(일 1회) 수령 여부 조회.
+    - KST 기준 '오늘'에 attendance_daily 기록이 있으면 claimed=True
+    """
+    if me.username != username:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission")
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+    if not user:
+        return {"status": 1, "claimed": False}
+
+    start_utc, end_utc = _kst_today_bounds_utc()
+    exists = (
+        db.query(Point.id)
+        .filter(
+            Point.user_id == user.id,
+            Point.reason == ATTENDANCE_REASON,
+            Point.created_at >= start_utc,
+            Point.created_at < end_utc,
+        )
+        .first()
+        is not None
+    )
+
+    return {"status": 0, "claimed": exists, "amount": ATTENDANCE_AMOUNT}
+
+
+@app.post("/community/points/attendance/claim/{username}")
+def attendance_claim(
+    username: str,
+    me: Community_User = Depends(get_current_community_user),
+    db: Session = Depends(get_db),
+):
+    """
+    출석체크 포인트 지급 (KST 기준 하루 1회, 200P).
+    - point 테이블에 기록되고 /community/points/{username}에서 조회 가능
+    """
+    if me.username != username:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission")
+
+    # 동시 클릭(중복 지급) 방지: user row를 잠그고 확인 후 지급
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .with_for_update()
+        .first()
+    )
+    if not user:
+        return {"status": 1, "claimed": False}
+
+    start_utc, end_utc = _kst_today_bounds_utc()
+    already = (
+        db.query(Point.id)
+        .filter(
+            Point.user_id == user.id,
+            Point.reason == ATTENDANCE_REASON,
+            Point.created_at >= start_utc,
+            Point.created_at < end_utc,
+        )
+        .first()
+        is not None
+    )
+    if already:
+        return {"status": 2, "claimed": True, "amount": 0, "point_balance": int(user.point_balance or 0)}
+
+    user.point_balance = int(user.point_balance or 0) + ATTENDANCE_AMOUNT
+    db.add(Point(user_id=user.id, reason=ATTENDANCE_REASON, amount=ATTENDANCE_AMOUNT))
+    db.commit()
+    db.refresh(user)
+
+    return {"status": 0, "claimed": True, "amount": ATTENDANCE_AMOUNT, "point_balance": int(user.point_balance or 0)}
+
+
 @app.get("/community/cash/{username}")
 def list_cash(username: str, db: Session = Depends(get_db)):
     """
