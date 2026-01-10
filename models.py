@@ -205,20 +205,18 @@ class Notification(Base):
 class Referral(Base):
     """
     커뮤니티 추천(추천인/피추천인) 이벤트 테이블.
-    - 기존 앱은 community_users를 사용하므로 FK도 community_users.id 기준으로 잡습니다.
+    - 사용자 요청: FK/UNIQUE 등 제약조건 제거 (DB에서 강제하지 않음)
     """
     __tablename__ = "referral"
 
     # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    referrer_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
-    referred_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    referrer_user_id = Column(BigInteger, nullable=False, index=True)
+    referred_user_id = Column(BigInteger, nullable=False, index=True)
     referrer_code = Column(String(20), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     __table_args__ = (
-        # 한 유저는 가입 시 1회만 추천인코드를 적용하도록 제한
-        UniqueConstraint("referred_user_id", name="uq_referral_referred_user_id"),
         Index("idx_referral_events_referrer", "referrer_user_id", "created_at"),
     )
 
@@ -226,13 +224,13 @@ class Referral(Base):
 class Point(Base):
     """
     포인트 원장(적립/사용 내역) 테이블.
-    - user_id는 community_users.id 기준
+    - 사용자 요청: FK 등 제약조건 제거 (DB에서 강제하지 않음)
     """
     __tablename__ = "point"
 
     # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
     reason = Column(String(50), nullable=False)
     amount = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

@@ -10,7 +10,7 @@ import models
 from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point
 import hashlib
 import jwt 
-from sqlalchemy import func ,select, or_, and_
+from sqlalchemy import func ,select, or_, and_, text
 from google_play import get_service, PACKAGE_NAME
 import crud
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -33,6 +33,45 @@ SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 SECRET_RSS_TOKEN = "rss-secret-token"
+
+def _drop_all_constraints_on_table(table_name: str) -> None:
+    """
+    PostgreSQL에서 특정 테이블에 걸린 모든 제약조건(FK/UNIQUE/CHECK 등)을 제거합니다.
+    - 사용자 요청: 제약조건 모두 없애기
+    - 주의: 데이터 무결성은 애플리케이션 로직으로만 보장됩니다.
+    """
+    try:
+        with engine.begin() as conn:
+            # 테이블이 없으면 skip
+            exists = conn.execute(
+                text("SELECT to_regclass(:tname) IS NOT NULL"),
+                {"tname": table_name},
+            ).scalar()
+            if not exists:
+                return
+
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT conname
+                    FROM pg_constraint
+                    WHERE conrelid = to_regclass(:tname)
+                    """
+                ),
+                {"tname": table_name},
+            ).fetchall()
+
+            for (conname,) in rows:
+                conn.execute(
+                    text(f'ALTER TABLE "{table_name}" DROP CONSTRAINT IF EXISTS "{conname}" CASCADE')
+                )
+    except Exception as e:
+        # 제약조건 제거 실패해도 서버는 뜨게 하되, 로그는 남김
+        print(f"[WARN] drop constraints failed for {table_name}: {e}")
+
+# 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
+_drop_all_constraints_on_table("referral")
+_drop_all_constraints_on_table("point")
 
 def get_db():
     db = SessionLocal()
@@ -547,18 +586,11 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             db.add(Point(user_id=user.id, reason="referral_bonus_referred", amount=bonus))
 
         except IntegrityError as e:
-            # 여기서 발생할 수 있는 IntegrityError는 여러 종류가 있음:
-            # - 피추천인 1회 제한(UniqueConstraint) 위반
-            # - FK 테이블 불일치(users vs community_users)로 인한 FK 위반
-            # - id 시퀀스/NOT NULL 문제 등
+            # 사용자 요청에 따라 referral/point 테이블 제약조건을 제거하므로
+            # 여기서는 "1회 제한" 같은 메시지를 내지 않고, DB 오류로만 처리합니다.
             db.rollback()
 
             pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-            msg = str(getattr(e, "orig", e))
-
-            # Unique violation (23505) 이면서 "피추천인 1회" 제약일 때만 7로 처리
-            if pgcode == "23505" and ("uq_referral_referred_user_id" in msg or "referred_user_id" in msg):
-                return {"status": 7, "detail": "추천인코드는 1회만 적용할 수 있습니다."}
 
             # FK violation (23503): 대부분 referral/point 테이블 FK가 users(id)를 참조하는데
             # 앱은 community_users(id)를 넣는 경우 발생
