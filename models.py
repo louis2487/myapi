@@ -238,3 +238,21 @@ class Point(Base):
     __table_args__ = (
         Index("idx_point_ledger_user_time", "user_id", "created_at"),
     )
+
+
+class Cash(Base):
+    """
+    캐시 원장(충전/사용 내역) 테이블.
+    - 사용자 요청: FK 등 제약조건 제거 (DB에서 강제하지 않음)
+    """
+    __tablename__ = "cash"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    reason = Column(String(50), nullable=False)
+    amount = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_cash_ledger_user_time", "user_id", "created_at"),
+    )

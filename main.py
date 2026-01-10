@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_, text
@@ -72,6 +72,7 @@ def _drop_all_constraints_on_table(table_name: str) -> None:
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
+_drop_all_constraints_on_table("cash")
 
 def get_db():
     db = SessionLocal()
@@ -663,6 +664,36 @@ def list_points(username: str, db: Session = Depends(get_db)):
             "created_at": p.created_at.isoformat() if p.created_at else None,
         }
         for p in rows
+    ]
+
+    return {"status": 0, "items": items}
+
+
+@app.get("/community/cash/{username}")
+def list_cash(username: str, db: Session = Depends(get_db)):
+    """
+    내 캐시 충전/사용 내역(원장).
+    """
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+    if not user:
+        return {"status": 1, "items": []}
+
+    rows = (
+        db.query(Cash)
+        .filter(Cash.user_id == user.id)
+        .order_by(Cash.created_at.desc(), Cash.id.desc())
+        .limit(500)
+        .all()
+    )
+
+    items = [
+        {
+            "id": c.id,
+            "reason": c.reason,
+            "amount": int(c.amount),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in rows
     ]
 
     return {"status": 0, "items": items}
