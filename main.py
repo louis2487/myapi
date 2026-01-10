@@ -1262,9 +1262,40 @@ class CommentListOut(BaseModel):
 
 @app.post("/community/posts/{username}", response_model=PostOut)
 def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
-    userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
-    if not userId:
+    # 유저 row lock으로 캐시 차감/포스트 생성 원자성 보장
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .with_for_update()
+        .first()
+    )
+    if not user:
         raise HTTPException(status_code=404, detail="Invalid username")
+
+    userId = user.id
+
+    # card_type: 1(유료1), 2(유료2), 3(무료) - 미지정이면 기본 3
+    try:
+        card_type = int(body.card_type) if body.card_type is not None else 3
+    except Exception:
+        card_type = 3
+
+    if card_type not in (1, 2, 3):
+        card_type = 3
+
+    cost = 0
+    if card_type == 1:
+        cost = 80000
+    elif card_type == 2:
+        cost = 30000
+
+    # 유료 유형일 때 캐시 차감 + 원장 기록
+    if cost > 0:
+        balance = int(user.cash_balance or 0)
+        if balance < cost:
+            raise HTTPException(status_code=400, detail="캐시가 부족합니다.")
+        user.cash_balance = balance - cost
+        db.add(Cash(user_id=userId, reason=f"post_card_type_{card_type}", amount=-cost))
 
     post = Community_Post(
         user_id=userId,
@@ -1323,7 +1354,7 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_sup = body.item4_sup,
         agent = body.agent,
         post_type= 1,
-        card_type= body.card_type,
+        card_type= card_type,
     )
    
     db.add(post)
