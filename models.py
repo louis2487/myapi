@@ -209,7 +209,8 @@ class Referral(Base):
     """
     __tablename__ = "referral"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     referrer_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
     referred_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
     referrer_code = Column(String(20), nullable=False)
@@ -229,7 +230,8 @@ class Point(Base):
     """
     __tablename__ = "point"
 
-    id = Column(BigInteger, primary_key=True, index=True)
+    # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
     reason = Column(String(50), nullable=False)
     amount = Column(BigInteger, nullable=False)

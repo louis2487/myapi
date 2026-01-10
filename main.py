@@ -546,9 +546,30 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             user.point_balance = int(user.point_balance or 0) + bonus
             db.add(Point(user_id=user.id, reason="referral_bonus_referred", amount=bonus))
 
-        except IntegrityError:
+        except IntegrityError as e:
+            # 여기서 발생할 수 있는 IntegrityError는 여러 종류가 있음:
+            # - 피추천인 1회 제한(UniqueConstraint) 위반
+            # - FK 테이블 불일치(users vs community_users)로 인한 FK 위반
+            # - id 시퀀스/NOT NULL 문제 등
             db.rollback()
-            return {"status": 7, "detail": "추천인코드는 1회만 적용할 수 있습니다."}
+
+            pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
+            msg = str(getattr(e, "orig", e))
+
+            # Unique violation (23505) 이면서 "피추천인 1회" 제약일 때만 7로 처리
+            if pgcode == "23505" and ("uq_referral_referred_user_id" in msg or "referred_user_id" in msg):
+                return {"status": 7, "detail": "추천인코드는 1회만 적용할 수 있습니다."}
+
+            # FK violation (23503): 대부분 referral/point 테이블 FK가 users(id)를 참조하는데
+            # 앱은 community_users(id)를 넣는 경우 발생
+            if pgcode == "23503":
+                return {
+                    "status": 8,
+                    "detail": "DB 제약조건(FK) 오류로 추천인 포인트 지급에 실패했습니다. referral/point 테이블 FK가 community_users(id)를 참조하는지 확인해주세요.",
+                }
+
+            # 그 외
+            return {"status": 8, "detail": "추천인 처리 중 DB 오류가 발생했습니다."}
 
     db.commit()
     db.refresh(user)
