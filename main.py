@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_
@@ -462,6 +462,7 @@ class SignupRequest_C(BaseModel):
     name: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
     region: str | None = Field(default=None, max_length=100)
+    referral_code: str | None = Field(default=None, max_length=20)
 
    
 @app.post("/community/signup")
@@ -493,6 +494,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         signup_date   = date.today(), 
     )
     db.add(user)
+    db.flush()
     
     # referral_code 생성 및 할당
     try:
@@ -508,10 +510,109 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             detail="회원가입 처리 중 오류가 발생했습니다"
         )
     
+    # 추천인코드가 있으면 referral/point 기록 + 포인트 지급
+    input_code = (req.referral_code or "").strip()
+    if input_code:
+        # 본인 코드로 추천 방지(가입 직후 생성된 코드와 동일할 가능성도 있어 체크)
+        if user.referral_code and input_code == user.referral_code:
+            db.rollback()
+            return {"status": 6, "detail": "본인 추천인코드는 사용할 수 없습니다."}
+
+        referrer = (
+            db.query(Community_User)
+            .filter(Community_User.referral_code == input_code)
+            .first()
+        )
+        if not referrer:
+            db.rollback()
+            return {"status": 6, "detail": "추천인코드가 올바르지 않습니다."}
+
+        try:
+            db.add(
+                Referral(
+                    referrer_user_id=referrer.id,
+                    referred_user_id=user.id,
+                    referrer_code=input_code,
+                )
+            )
+
+            bonus = 1000
+
+            # 추천인 포인트 적립
+            referrer.point_balance = int(referrer.point_balance or 0) + bonus
+            db.add(Point(user_id=referrer.id, reason="referral_bonus_referrer", amount=bonus))
+
+            # 피추천인 포인트 적립
+            user.point_balance = int(user.point_balance or 0) + bonus
+            db.add(Point(user_id=user.id, reason="referral_bonus_referred", amount=bonus))
+
+        except IntegrityError:
+            db.rollback()
+            return {"status": 7, "detail": "추천인코드는 1회만 적용할 수 있습니다."}
+
     db.commit()
     db.refresh(user)
 
     return {"status": 0}
+
+
+@app.get("/community/referrals/by-referrer/{username}")
+def list_referrals_by_referrer(username: str, db: Session = Depends(get_db)):
+    """
+    내가 추천한 회원 목록(닉네임 기준).
+    """
+    referrer = db.query(Community_User).filter(Community_User.username == username).first()
+    if not referrer:
+        return {"status": 1, "items": []}
+
+    rows = (
+        db.query(Referral, Community_User.username.label("referred_username"))
+        .join(Community_User, Community_User.id == Referral.referred_user_id)
+        .filter(Referral.referrer_user_id == referrer.id)
+        .order_by(Referral.created_at.desc(), Referral.id.desc())
+        .all()
+    )
+
+    items = [
+        {
+            "id": r.Referral.id,
+            "referred_username": r.referred_username,
+            "created_at": r.Referral.created_at.isoformat() if r.Referral.created_at else None,
+        }
+        for r in rows
+    ]
+
+    return {"status": 0, "items": items}
+
+
+@app.get("/community/points/{username}")
+def list_points(username: str, db: Session = Depends(get_db)):
+    """
+    내 포인트 적립/사용 내역(원장).
+    """
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+    if not user:
+        return {"status": 1, "items": []}
+
+    rows = (
+        db.query(Point)
+        .filter(Point.user_id == user.id)
+        .order_by(Point.created_at.desc(), Point.id.desc())
+        .limit(500)
+        .all()
+    )
+
+    items = [
+        {
+            "id": p.id,
+            "reason": p.reason,
+            "amount": int(p.amount),
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in rows
+    ]
+
+    return {"status": 0, "items": items}
 
 
 @app.get("/community/user/{username}")

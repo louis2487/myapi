@@ -200,3 +200,41 @@ class Notification(Base):
     is_read = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Referral(Base):
+    """
+    커뮤니티 추천(추천인/피추천인) 이벤트 테이블.
+    - 기존 앱은 community_users를 사용하므로 FK도 community_users.id 기준으로 잡습니다.
+    """
+    __tablename__ = "referral"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    referrer_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    referred_user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    referrer_code = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        # 한 유저는 가입 시 1회만 추천인코드를 적용하도록 제한
+        UniqueConstraint("referred_user_id", name="uq_referral_referred_user_id"),
+        Index("idx_referral_events_referrer", "referrer_user_id", "created_at"),
+    )
+
+
+class Point(Base):
+    """
+    포인트 원장(적립/사용 내역) 테이블.
+    - user_id는 community_users.id 기준
+    """
+    __tablename__ = "point"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    reason = Column(String(50), nullable=False)
+    amount = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_point_ledger_user_time", "user_id", "created_at"),
+    )
