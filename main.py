@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_, text
@@ -22,7 +22,12 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import re
 import requests
+try:
+    import httpx  # type: ignore
+except Exception:  # pragma: no cover
+    httpx = None
 from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 import openpyxl, tempfile
 from rss_service import fetch_rss_and_save, parse_pubdate
 Base.metadata.create_all(bind=engine)
@@ -33,6 +38,18 @@ SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 SECRET_RSS_TOKEN = "rss-secret-token"
+
+# -------------------- TossPayments (SSOT) --------------------
+# clientKey: 결제 페이지(HTML)에서만 사용
+# secretKey: 서버에서 confirm 호출에만 사용 (절대 앱/웹에 노출 금지)
+TOSS_CLIENT_KEY = os.getenv("TOSS_CLIENT_KEY", "").strip()
+TOSS_SECRET_KEY = os.getenv("TOSS_SECRET_KEY", "").strip()
+
+# 결제 성공/실패 시 앱으로 돌아오는 딥링크 스킴
+TOSS_APP_SCHEME = os.getenv("TOSS_APP_SCHEME", "smartgauge").strip() or "smartgauge"
+
+# 캐시 충전 허용 금액(서버가 최종 결정)
+ALLOWED_CASH_AMOUNTS = {10000, 30000, 50000, 80000, 100000}
 
 def _drop_all_constraints_on_table(table_name: str) -> None:
     """
@@ -503,6 +520,10 @@ class SignupRequest_C(BaseModel):
     phone_number: str | None = Field(default=None, max_length=20)
     region: str | None = Field(default=None, max_length=100)
     referral_code: str | None = Field(default=None, max_length=20)
+    # community_users 신규 필드(2026-01)
+    marketing_consent: bool = False
+    custom_industry_codes: list[str] = Field(default_factory=list)
+    custom_region_codes: list[str] = Field(default_factory=list)
 
    
 @app.post("/community/signup")
@@ -532,6 +553,9 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         phone_number  = req.phone_number,
         region        = req.region,  
         signup_date   = date.today(), 
+        marketing_consent=bool(req.marketing_consent),
+        custom_industry_codes=list(req.custom_industry_codes or []),
+        custom_region_codes=list(req.custom_region_codes or []),
     )
     db.add(user)
     db.flush()
@@ -701,6 +725,11 @@ def attendance_status(
     if not user:
         return {"status": 1, "claimed": False}
 
+    # 신규 필드(last_attendance_date)가 있으면 우선 사용
+    today_kst = datetime.now(tz=KST).date()
+    if getattr(user, "last_attendance_date", None) == today_kst:
+        return {"status": 0, "claimed": True, "amount": ATTENDANCE_AMOUNT}
+
     start_utc, end_utc = _kst_today_bounds_utc()
     exists = (
         db.query(Point.id)
@@ -740,6 +769,10 @@ def attendance_claim(
     if not user:
         return {"status": 1, "claimed": False}
 
+    today_kst = datetime.now(tz=KST).date()
+    if getattr(user, "last_attendance_date", None) == today_kst:
+        return {"status": 2, "claimed": True, "amount": 0, "point_balance": int(user.point_balance or 0)}
+
     start_utc, end_utc = _kst_today_bounds_utc()
     already = (
         db.query(Point.id)
@@ -753,14 +786,49 @@ def attendance_claim(
         is not None
     )
     if already:
+        # 과거 방식(point 테이블)로 이미 지급된 경우에도 신규 필드 동기화
+        try:
+            user.last_attendance_date = today_kst
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            db.rollback()
         return {"status": 2, "claimed": True, "amount": 0, "point_balance": int(user.point_balance or 0)}
 
     user.point_balance = int(user.point_balance or 0) + ATTENDANCE_AMOUNT
+    user.last_attendance_date = today_kst
     db.add(Point(user_id=user.id, reason=ATTENDANCE_REASON, amount=ATTENDANCE_AMOUNT))
     db.commit()
     db.refresh(user)
 
     return {"status": 0, "claimed": True, "amount": ATTENDANCE_AMOUNT, "point_balance": int(user.point_balance or 0)}
+
+
+@app.post("/community/popup/seen")
+def mark_popup_seen(
+    me: Community_User = Depends(get_current_community_user),
+    db: Session = Depends(get_db),
+):
+    """
+    팝업(공지/이벤트 등) 마지막 확인 시각 저장.
+    - community_users.popup_last_seen_at 갱신
+    """
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.id == me.id)
+        .with_for_update()
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.popup_last_seen_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(user)
+    return {
+        "status": 0,
+        "popup_last_seen_at": user.popup_last_seen_at.isoformat() if user.popup_last_seen_at else None,
+    }
 
 
 @app.get("/community/cash/{username}")
@@ -793,6 +861,288 @@ def list_cash(username: str, db: Session = Depends(get_db)):
     return {"status": 0, "items": items}
 
 
+# ==================== TossPayments: 주문 생성 / 결제 페이지 / 승인(confirm) ====================
+
+class TossOrderCreateRequest(BaseModel):
+    username: str
+    amount: int
+
+class TossOrderCreateResponse(BaseModel):
+    status: int
+    orderId: str
+    amount: int
+    orderName: str
+    customerName: str
+
+
+@app.post("/orders/create", response_model=TossOrderCreateResponse)
+def create_order_for_toss(req: TossOrderCreateRequest, db: Session = Depends(get_db)):
+    """
+    캐시 충전용 주문 생성(SSOT).
+    - amount는 서버에서 허용된 값만 인정
+    - payments 테이블에 PENDING row 생성
+    """
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username required")
+
+    try:
+        amount = int(req.amount)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid amount")
+
+    if amount not in ALLOWED_CASH_AMOUNTS:
+        raise HTTPException(status_code=400, detail="amount not allowed")
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    order_id = uuid.uuid4()
+    row = Payment(
+        order_id=order_id,
+        user_id=user.id,
+        amount=amount,
+        status="PENDING",
+    )
+    db.add(row)
+    db.commit()
+
+    order_name = "캐시 충전"
+    customer_name = (user.name or user.username or "고객").strip()
+    return TossOrderCreateResponse(
+        status=0,
+        orderId=str(order_id),
+        amount=amount,
+        orderName=order_name,
+        customerName=customer_name,
+    )
+
+
+@app.get("/pay/toss")
+def pay_toss_page(
+    orderId: str = Query(...),
+    amount: int = Query(...),
+    orderName: str = Query("캐시 충전"),
+    customerName: str = Query("고객"),
+    customerEmail: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    TossPayments 결제창(개별 API) 요청 페이지(HTML).
+    - orderId/amount는 DB(SSOT) 기준으로 검증
+    """
+    if not TOSS_CLIENT_KEY:
+        raise HTTPException(status_code=500, detail="TOSS_CLIENT_KEY not configured")
+
+    try:
+        order_uuid = uuid.UUID(orderId)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid orderId")
+
+    pay = db.query(Payment).filter(Payment.order_id == order_uuid).first()
+    if not pay:
+        raise HTTPException(status_code=404, detail="order not found")
+
+    if pay.status != "PENDING":
+        raise HTTPException(status_code=400, detail=f"order not payable (status={pay.status})")
+
+    if int(pay.amount) != int(amount):
+        raise HTTPException(status_code=400, detail="amount mismatch")
+
+    # Toss가 paymentKey/orderId/amount를 query로 붙여서 redirect
+    success_url = f"{TOSS_APP_SCHEME}://toss/success"
+    fail_url = f"{TOSS_APP_SCHEME}://toss/fail"
+
+    # customerEmail은 선택값. (없으면 Toss가 무시)
+    customer_email_js = (
+        f'"{customerEmail}"' if customerEmail else "undefined"
+    )
+
+    html = f"""<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TossPayments 결제</title>
+    <style>
+      body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; }}
+      .box {{ max-width: 520px; margin: 0 auto; }}
+      .muted {{ color: #666; font-size: 13px; }}
+      .err {{ color: #b00020; white-space: pre-wrap; }}
+    </style>
+    <script src="https://js.tosspayments.com/v1/payment"></script>
+  </head>
+  <body>
+    <div class="box">
+      <h3>결제 진행 중...</h3>
+      <p class="muted">잠시만 기다려주세요. 결제창이 자동으로 열립니다.</p>
+      <pre id="err" class="err"></pre>
+    </div>
+    <script>
+      (function() {{
+        try {{
+          var clientKey = "{TOSS_CLIENT_KEY}";
+          var tossPayments = TossPayments(clientKey);
+          tossPayments.requestPayment("카드", {{
+            amount: {int(amount)},
+            orderId: "{orderId}",
+            orderName: {json.dumps(orderName)},
+            customerName: {json.dumps(customerName)},
+            customerEmail: {customer_email_js},
+            successUrl: "{success_url}",
+            failUrl: "{fail_url}",
+          }});
+        }} catch (e) {{
+          var el = document.getElementById("err");
+          el.textContent = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
+        }}
+      }})();
+    </script>
+  </body>
+</html>"""
+
+    return HTMLResponse(content=html, status_code=200)
+
+
+class TossConfirmRequest(BaseModel):
+    paymentKey: str
+    orderId: str
+    amount: int
+
+
+@app.post("/payments/toss/confirm")
+def confirm_toss_payment(req: TossConfirmRequest, db: Session = Depends(get_db)):
+    """
+    TossPayments 결제 승인(confirm) - SSOT 검증 필수.
+    - orderId/amount는 DB와 일치해야 함
+    - 이미 PAID면 중복 승인 방지(멱등 처리)
+    - 성공 시 payments.status=PAID + cash_balance 증가 + cash 원장 기록
+    """
+    if not TOSS_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="TOSS_SECRET_KEY not configured")
+
+    payment_key = (req.paymentKey or "").strip()
+    if not payment_key:
+        raise HTTPException(status_code=400, detail="paymentKey required")
+
+    try:
+        order_uuid = uuid.UUID(req.orderId)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid orderId")
+
+    try:
+        amount = int(req.amount)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid amount")
+
+    # 동시 confirm 방지: row lock
+    pay = (
+        db.query(Payment)
+        .filter(Payment.order_id == order_uuid)
+        .with_for_update()
+        .first()
+    )
+    if not pay:
+        raise HTTPException(status_code=404, detail="order not found")
+
+    if int(pay.amount) != amount:
+        raise HTTPException(status_code=400, detail="amount mismatch")
+
+    if pay.status == "PAID":
+        return {"status": 0, "alreadyPaid": True, "orderId": str(pay.order_id), "amount": int(pay.amount), "paymentKey": pay.payment_key}
+
+    if pay.status != "PENDING":
+        raise HTTPException(status_code=400, detail=f"order not confirmable (status={pay.status})")
+
+    # Toss confirm API 호출
+    auth = base64.b64encode(f"{TOSS_SECRET_KEY}:".encode("utf-8")).decode("utf-8")
+    headers = {
+        "Authorization": f"Basic {auth}",
+        "Content-Type": "application/json",
+    }
+    payload = {"paymentKey": payment_key, "orderId": str(order_uuid), "amount": amount}
+
+    try:
+        if httpx is not None:
+            resp = httpx.post(
+                "https://api.tosspayments.com/v1/payments/confirm",
+                headers=headers,
+                json=payload,
+                timeout=20.0,
+            )
+            resp_status = resp.status_code
+            resp_json = resp.json
+            resp_text = resp.text
+        else:
+            r = requests.post(
+                "https://api.tosspayments.com/v1/payments/confirm",
+                headers=headers,
+                json=payload,
+                timeout=20,
+            )
+            resp_status = r.status_code
+            resp_text = r.text
+            resp_json = r.json
+    except Exception as e:
+        # 네트워크/타임아웃: 주문은 여전히 PENDING으로 유지
+        raise HTTPException(status_code=502, detail=f"toss confirm request failed: {e}")
+
+    if resp_status < 200 or resp_status >= 300:
+        # 실패 기록
+        pay.status = "FAILED"
+        db.commit()
+        try:
+            detail = resp_json()
+        except Exception:
+            detail = {"message": resp_text}
+        raise HTTPException(status_code=400, detail={"toss": detail})
+
+    data = resp_json()
+
+    # approvedAt는 ISO8601 문자열. 파싱 실패 시 None 허용
+    approved_at = None
+    try:
+        approved_at_raw = data.get("approvedAt")
+        if approved_at_raw:
+            approved_at = datetime.fromisoformat(approved_at_raw.replace("Z", "+00:00"))
+    except Exception:
+        approved_at = None
+
+    pay.status = "PAID"
+    pay.payment_key = payment_key
+    pay.approved_at = approved_at
+
+    # 캐시 충전 반영(SSOT: payments.user_id 기준)
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.id == pay.user_id)
+        .with_for_update()
+        .first()
+    )
+    if not user:
+        # 결제는 승인됐지만 유저가 없다면 치명적 -> 롤백 불가 상황 방지 위해 FAILED로 바꾸지 않고 에러만 반환
+        db.commit()
+        raise HTTPException(status_code=500, detail="user not found for payment")
+
+    user.cash_balance = int(user.cash_balance or 0) + int(pay.amount)
+    db.add(Cash(user_id=user.id, reason="toss_cash_charge", amount=int(pay.amount)))
+
+    db.commit()
+
+    return {
+        "status": 0,
+        "orderId": str(pay.order_id),
+        "amount": int(pay.amount),
+        "paymentKey": pay.payment_key,
+        "approvedAt": pay.approved_at.isoformat() if pay.approved_at else None,
+        "toss": {
+            "method": data.get("method"),
+            "status": data.get("status"),
+        },
+    }
+
+
 @app.get("/community/user/{username}")
 def get_user(username: str, db: Session = Depends(get_db)):
 
@@ -803,6 +1153,8 @@ def get_user(username: str, db: Session = Depends(get_db)):
 
     # signup_date를 문자열로 변환 (None이면 None 유지)
     signup_date_str = user.signup_date.isoformat() if user.signup_date else None
+    popup_last_seen_at_str = user.popup_last_seen_at.isoformat() if getattr(user, "popup_last_seen_at", None) else None
+    last_attendance_date_str = user.last_attendance_date.isoformat() if getattr(user, "last_attendance_date", None) else None
     
     return {
         "status": 0,
@@ -816,6 +1168,11 @@ def get_user(username: str, db: Session = Depends(get_db)):
             "cash_balance": user.cash_balance if user.cash_balance is not None else 0,
             "admin_acknowledged": user.admin_acknowledged if user.admin_acknowledged is not None else False,
             "referral_code": user.referral_code,
+            "custom_industry_codes": list(getattr(user, "custom_industry_codes", None) or []),
+            "custom_region_codes": list(getattr(user, "custom_region_codes", None) or []),
+            "popup_last_seen_at": popup_last_seen_at_str,
+            "last_attendance_date": last_attendance_date_str,
+            "marketing_consent": bool(getattr(user, "marketing_consent", False)),
         }
     }
 
@@ -827,6 +1184,10 @@ class UserUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=50)       # 실명
     phone_number: str | None = Field(default=None, max_length=20)
     region: str | None = Field(default=None, max_length=100)
+    # community_users 신규 필드(2026-01)
+    marketing_consent: bool | None = None
+    custom_industry_codes: list[str] | None = None
+    custom_region_codes: list[str] | None = None
 
 @app.put("/community/user/{username}")
 def update_user(
@@ -890,6 +1251,15 @@ def update_user(
 
     if req.region is not None:
         user.region = req.region
+
+    if req.marketing_consent is not None:
+        user.marketing_consent = bool(req.marketing_consent)
+
+    if req.custom_industry_codes is not None:
+        user.custom_industry_codes = list(req.custom_industry_codes or [])
+
+    if req.custom_region_codes is not None:
+        user.custom_region_codes = list(req.custom_region_codes or [])
 
     db.commit()
     db.refresh(user)
@@ -1573,6 +1943,101 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
 class PostsOut2(BaseModel):
     items: list[PostOut2]
     next_cursor: str | None = None
+
+
+@app.get("/community/posts/custom", response_model=PostsOut2)
+def list_posts_custom_by_user_settings(
+    cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
+    limit: int = Query(100, ge=1, le=100),
+    status: Optional[str] = Query(None, description="published | closed"),
+    me: Community_User = Depends(get_current_community_user),
+    db: Session = Depends(get_db),
+):
+    """
+    맞춤현장(유저 설정) 기반 구인글(post_type=1) 목록.
+
+    - 로그인 필요(Authorization Bearer 토큰)
+    - 필터 기준:
+      - community_users.custom_industry_codes: job_industry(문자열/CSV)에 포함되는지 LIKE로 매칭
+      - community_users.custom_region_codes:
+        - "전체" 포함 시 지역 필터 없음
+        - "서울" => province="서울"
+        - "서울 강남구" => province="서울" AND city LIKE "%강남구%"
+    """
+    q = (
+        db.query(Community_Post)
+        .filter(Community_Post.post_type == 1)
+        .order_by(Community_Post.created_at.desc())
+    )
+
+    if status in ("published", "closed"):
+        q = q.filter(Community_Post.status == status)
+
+    # --- 산업(업종) 필터 ---
+    industries = [str(x).strip() for x in (getattr(me, "custom_industry_codes", None) or []) if str(x).strip()]
+    if industries and "전체" not in industries:
+        q = q.filter(
+            or_(*[Community_Post.job_industry.ilike(f"%{ind}%") for ind in industries])
+        )
+
+    # --- 지역 필터 ---
+    regions = [str(x).strip() for x in (getattr(me, "custom_region_codes", None) or []) if str(x).strip()]
+    if regions and "전체" not in regions:
+        conds = []
+        for code in regions:
+            parts = code.split()
+            if not parts:
+                continue
+            prov = parts[0]
+            city = "전체" if len(parts) == 1 else " ".join(parts[1:]).strip() or "전체"
+
+            if prov == "전체":
+                conds = []
+                break
+
+            if city == "전체":
+                conds.append(Community_Post.province == prov)
+            else:
+                conds.append(
+                    and_(
+                        Community_Post.province == prov,
+                        or_(
+                            Community_Post.city == city,
+                            Community_Post.city.like(f"%{city}%"),
+                        ),
+                    )
+                )
+
+        if conds:
+            q = q.filter(or_(*conds))
+
+    if cursor:
+        try:
+            cur_dt = datetime.fromisoformat(cursor)
+            q = q.filter(Community_Post.created_at < cur_dt)
+        except Exception:
+            pass
+
+    rows = q.limit(limit).all()
+
+    # 좋아요 여부는 me.username 기준으로 계산
+    liked_ids = set()
+    if rows and me.username:
+        post_ids = [p.id for p in rows]
+        liked_rows = (
+            db.query(Post_Like.post_id)
+            .filter(Post_Like.username == me.username, Post_Like.post_id.in_(post_ids))
+            .all()
+        )
+        liked_ids = {pid for (pid,) in liked_rows}
+
+    items = [
+        PostOut2.model_validate(p, from_attributes=True).model_copy(update={"liked": (p.id in liked_ids)})
+        for p in rows
+    ]
+
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return PostsOut2(items=items, next_cursor=next_cursor)
 
 
 @app.get("/community/posts", response_model=PostsOut2)

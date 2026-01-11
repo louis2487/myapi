@@ -1,10 +1,12 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
+from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, ARRAY
+from sqlalchemy.dialects.postgresql import UUID
+import uuid as _uuid
 Base = declarative_base()
 
 class RuntimeRecord(Base):
@@ -88,6 +90,20 @@ class Community_User(Base):
     cash_balance = Column(BigInteger, nullable=False, server_default="0")
     admin_acknowledged = Column(Boolean, nullable=False, server_default="false")
     referral_code = Column(String(20), nullable=True)
+    # --- 2026-01: community_users 신규 필드(서버/앱 연동용) ---
+    custom_industry_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    custom_region_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    popup_last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_attendance_date = Column(Date, nullable=True)
+    marketing_consent = Column(Boolean, nullable=False, server_default="false")
 
 class Community_Post(Base):
     __tablename__ = "community_posts"
@@ -256,3 +272,23 @@ class Cash(Base):
     __table_args__ = (
         Index("idx_cash_ledger_user_time", "user_id", "created_at"),
     )
+
+
+class Payment(Base):
+    """
+    TossPayments 결제 상태 저장 (orders/payments SSOT).
+    DB 스키마는 사용자가 제공한 payments 테이블을 기준으로 매핑합니다.
+    """
+    __tablename__ = "payments"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    order_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True, default=_uuid.uuid4)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    amount = Column(BigInteger, nullable=False)
+    status = Column(String(20), nullable=False)  # PENDING | PAID | FAILED | CANCELED
+
+    payment_key = Column(String(200), nullable=True, unique=True, index=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
