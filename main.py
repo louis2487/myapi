@@ -1,5 +1,9 @@
 import os
 from datetime import datetime, timedelta, timezone, date
+try:
+    from zoneinfo import ZoneInfo  # py3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, Query, Body
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -1966,6 +1970,23 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
 
     userId = user.id
 
+    # ---- 구인글(=post_type 1) 작성 제한: 하루 1회 (자정 기준, KST) ----
+    now_utc = datetime.now(timezone.utc)
+    kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+    now_kst = now_utc.astimezone(kst)
+
+    last = user.last_recruit_posted_at
+    if last is not None:
+        # tzinfo가 없으면 UTC로 간주(레거시/드라이버 이슈 방어)
+        if getattr(last, "tzinfo", None) is None:
+            last = last.replace(tzinfo=timezone.utc)
+        last_kst = last.astimezone(kst)
+        if last_kst.date() == now_kst.date():
+            raise HTTPException(
+                status_code=400,
+                detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
+            )
+
     # card_type: 1(유료1), 2(유료2), 3(무료) - 미지정이면 기본 3
     try:
         card_type = int(body.card_type) if body.card_type is not None else 3
@@ -2049,6 +2070,11 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         card_type= card_type,
     )
    
+    # ---- 구인글 작성 보상: 1000포인트 지급 + 마지막 작성 시각 갱신 ----
+    user.point_balance = int(user.point_balance or 0) + 1000
+    user.last_recruit_posted_at = now_utc
+    db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+
     db.add(post)
     db.commit()
     db.refresh(post)
@@ -2117,9 +2143,62 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
 
 @app.post("/community/posts/{username}/type/{post_type}", response_model=PostOut)
 def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session = Depends(get_db)):
-    userId = db.query(Community_User.id).filter(Community_User.username == username).scalar()
-    if not userId:
+    # 유저 row lock (포인트/캐시/작성제한 원자성 보장)
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .with_for_update()
+        .first()
+    )
+    if not user:
         raise HTTPException(status_code=404, detail="Invalid username")
+
+    userId = user.id
+
+    # post_type == 1 (구인글): 하루 1회 제한 + 포인트 지급
+    if int(post_type) == 1:
+        now_utc = datetime.now(timezone.utc)
+        kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+        now_kst = now_utc.astimezone(kst)
+
+        last = user.last_recruit_posted_at
+        if last is not None:
+            if getattr(last, "tzinfo", None) is None:
+                last = last.replace(tzinfo=timezone.utc)
+            last_kst = last.astimezone(kst)
+            if last_kst.date() == now_kst.date():
+                raise HTTPException(
+                    status_code=400,
+                    detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
+                )
+
+        # card_type 결제 규칙은 /community/posts/{username} 와 동일하게 적용
+        try:
+            card_type = int(body.card_type) if body.card_type is not None else 3
+        except Exception:
+            card_type = 3
+        if card_type not in (1, 2, 3):
+            card_type = 3
+
+        cost = 0
+        if card_type == 1:
+            cost = 80000
+        elif card_type == 2:
+            cost = 30000
+
+        if cost > 0:
+            balance = int(user.cash_balance or 0)
+            if balance < cost:
+                raise HTTPException(status_code=400, detail="캐시가 부족합니다.")
+            user.cash_balance = balance - cost
+            db.add(Cash(user_id=userId, reason=f"post_card_type_{card_type}", amount=-cost))
+
+        # 보상/작성시각 갱신
+        user.point_balance = int(user.point_balance or 0) + 1000
+        user.last_recruit_posted_at = now_utc
+        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+    else:
+        card_type = body.card_type
 
     post = Community_Post(
         user_id=userId,
@@ -2176,7 +2255,7 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         item4_sup = body.item4_sup,
         agent = body.agent,
         post_type=post_type,
-        card_type=body.card_type,
+        card_type=card_type,
     )
    
     db.add(post)
