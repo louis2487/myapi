@@ -725,7 +725,28 @@ def community_phone_verify(req: PhoneVerifyRequest, db: Session = Depends(get_db
 def community_find_username(req: FindUsernameRequest, db: Session = Depends(get_db)):
     digits = _require_verified_phone(db, req.phone_number, req.phone_verification_id)
 
-    users = db.query(Community_User).filter(Community_User.phone_number == digits).all()
+    # 기존 데이터가 하이픈 포함으로 저장되어 있을 수 있어, DB/파이썬에서 숫자만 비교
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:
+        dialect = ""
+
+    if dialect == "postgresql":
+        users = (
+            db.query(Community_User)
+            .filter(
+                func.regexp_replace(Community_User.phone_number, r"[^0-9]", "", "g") == digits
+            )
+            .all()
+        )
+    else:
+        rows = (
+            db.query(Community_User)
+            .filter(Community_User.phone_number.isnot(None))
+            .all()
+        )
+        users = [u for u in rows if _normalize_phone(u.phone_number or "") == digits]
+
     if not users:
         return {"status": 1, "items": []}
 
@@ -743,7 +764,8 @@ def community_reset_password(req: ResetPasswordRequest, db: Session = Depends(ge
     if not user:
         return {"status": 1, "detail": "사용자를 찾을 수 없습니다."}
 
-    if (user.phone_number or "") != digits:
+    # 기존 데이터(하이픈 포함) 고려하여 숫자만 비교
+    if _normalize_phone(user.phone_number or "") != digits:
         return {"status": 3, "detail": "휴대폰 번호가 일치하지 않습니다."}
 
     user.password_hash = hashlib.sha256(req.new_password.encode()).hexdigest()
