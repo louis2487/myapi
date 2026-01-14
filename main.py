@@ -35,6 +35,13 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 bearer = HTTPBearer(auto_error=True)
 
+# .env 로드(로컬/개발 편의). 운영 환경에서는 플랫폼의 환경변수 주입을 권장.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
+
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -56,7 +63,8 @@ ALLOWED_CASH_AMOUNTS = {10000, 30000, 50000, 80000, 100000}
 ALIGO_API_KEY = os.getenv("ALIGO_API_KEY", "").strip()
 ALIGO_USER_ID = os.getenv("ALIGO_USER_ID", "").strip()
 ALIGO_SENDER = os.getenv("ALIGO_SENDER", "").strip()
-ALIGO_TESTMODE_YN = os.getenv("ALIGO_TESTMODE_YN", "").strip().upper()  # 'Y' / 'N'
+# 기본값 N(실발송). 필요 시 Y로 설정
+ALIGO_TESTMODE_YN = os.getenv("ALIGO_TESTMODE_YN", "N").strip().upper()  # 'Y' / 'N'
 
 PHONE_VERIFICATION_TTL_SECONDS = int(os.getenv("PHONE_VERIFICATION_TTL_SECONDS", "300"))  # default 5m
 PHONE_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PHONE_VERIFICATION_MAX_ATTEMPTS", "5"))
