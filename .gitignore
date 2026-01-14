@@ -4,3 +4,4 @@ server-key.json
 *.keystore
 *.pem
 *.p12
+.env
