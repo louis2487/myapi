@@ -105,6 +105,23 @@ class Community_User(Base):
     last_attendance_date = Column(Date, nullable=True)
     marketing_consent = Column(Boolean, nullable=False, server_default="false")
 
+class Community_Phone_Verification(Base):
+    """
+    커뮤니티 회원가입 휴대폰 인증번호 발송/검증 이력.
+    - 회원가입 단계에서만 사용 (phone_number + verified_at으로 검증)
+    """
+    __tablename__ = "community_phone_verifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    phone_number = Column(String(20), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    attempts = Column(Integer, nullable=False, server_default="0")
+
 class Community_Post(Base):
     __tablename__ = "community_posts"
     id = Column(Integer, primary_key=True, index=True)

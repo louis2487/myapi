@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Phone_Verification, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_, text
@@ -26,6 +26,7 @@ try:
     import httpx  # type: ignore
 except Exception:  # pragma: no cover
     httpx = None
+import secrets
 from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 import openpyxl, tempfile
@@ -50,6 +51,66 @@ TOSS_APP_SCHEME = os.getenv("TOSS_APP_SCHEME", "smartgauge").strip() or "smartga
 
 # 캐시 충전 허용 금액(서버가 최종 결정)
 ALLOWED_CASH_AMOUNTS = {10000, 30000, 50000, 80000, 100000}
+
+# -------------------- Aligo SMS (community phone verification) --------------------
+ALIGO_API_KEY = os.getenv("ALIGO_API_KEY", "").strip()
+ALIGO_USER_ID = os.getenv("ALIGO_USER_ID", "").strip()
+ALIGO_SENDER = os.getenv("ALIGO_SENDER", "").strip()
+ALIGO_TESTMODE_YN = os.getenv("ALIGO_TESTMODE_YN", "").strip().upper()  # 'Y' / 'N'
+
+PHONE_VERIFICATION_TTL_SECONDS = int(os.getenv("PHONE_VERIFICATION_TTL_SECONDS", "300"))  # default 5m
+PHONE_VERIFICATION_MAX_ATTEMPTS = int(os.getenv("PHONE_VERIFICATION_MAX_ATTEMPTS", "5"))
+
+def _normalize_phone(value: str) -> str:
+    return re.sub(r"[^0-9]", "", (value or "").strip())
+
+def _is_valid_korean_phone(digits: str) -> bool:
+    # 최소한의 검증: 10~11자리 숫자
+    return digits.isdigit() and (10 <= len(digits) <= 11)
+
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+def _generate_6digit_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+def _send_aligo_sms(receiver_digits: str, message: str) -> dict:
+    """
+    알리고 SMS 발송. 실패 시 HTTPException 발생.
+    """
+    if not (ALIGO_API_KEY and ALIGO_USER_ID and ALIGO_SENDER):
+        raise HTTPException(status_code=500, detail="ALIGO not configured (ALIGO_API_KEY/ALIGO_USER_ID/ALIGO_SENDER)")
+
+    payload = {
+        "key": ALIGO_API_KEY,
+        "user_id": ALIGO_USER_ID,
+        "sender": ALIGO_SENDER,
+        "receiver": receiver_digits,
+        "msg": message,
+        "msg_type": "SMS",
+    }
+    if ALIGO_TESTMODE_YN in {"Y", "N"}:
+        payload["testmode_yn"] = ALIGO_TESTMODE_YN
+
+    try:
+        r = requests.post("https://apis.aligo.in/send/", data=payload, timeout=10)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"SMS provider error: {e}")
+
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"SMS provider http error: {r.status_code}")
+
+    result_code = str(data.get("result_code", ""))
+    if result_code and result_code != "1":
+        detail = data.get("message") or data.get("msg") or data.get("error") or data
+        raise HTTPException(status_code=400, detail=f"SMS send failed: {detail}")
+
+    return data
 
 def _drop_all_constraints_on_table(table_name: str) -> None:
     """
@@ -518,12 +579,95 @@ class SignupRequest_C(BaseModel):
     password_confirm: str = Field(min_length=2, max_length=255)
     name: str | None = Field(default=None, max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
+    phone_verification_id: str | None = Field(default=None, max_length=80)
     region: str | None = Field(default=None, max_length=100)
     referral_code: str | None = Field(default=None, max_length=20)
     # community_users 신규 필드(2026-01)
     marketing_consent: bool = False
     custom_industry_codes: list[str] = Field(default_factory=list)
     custom_region_codes: list[str] = Field(default_factory=list)
+
+class PhoneSendRequest(BaseModel):
+    phone_number: str = Field(min_length=8, max_length=30)
+
+class PhoneSendResponse(BaseModel):
+    status: int
+    verification_id: str | None = None
+    expires_in_sec: int | None = None
+
+class PhoneVerifyRequest(BaseModel):
+    verification_id: str = Field(min_length=10, max_length=80)
+    code: str = Field(min_length=4, max_length=10)
+
+class PhoneVerifyResponse(BaseModel):
+    status: int
+    verified: bool = False
+
+@app.post("/community/phone/send", response_model=PhoneSendResponse)
+def community_phone_send(req: PhoneSendRequest, db: Session = Depends(get_db)):
+    digits = _normalize_phone(req.phone_number)
+    if not _is_valid_korean_phone(digits):
+        raise HTTPException(status_code=400, detail="invalid phone_number")
+
+    code = _generate_6digit_code()
+    now = datetime.now(tz=timezone.utc)
+    expires_at = now + timedelta(seconds=PHONE_VERIFICATION_TTL_SECONDS)
+
+    row = Community_Phone_Verification(
+        phone_number=digits,
+        code_hash=_hash_code(code),
+        expires_at=expires_at,
+    )
+    db.add(row)
+    db.flush()  # id 생성
+
+    msg = f"[대원앱] 인증번호는 {code} 입니다."
+    try:
+        _send_aligo_sms(digits, msg)
+    except Exception:
+        db.rollback()
+        raise
+
+    db.commit()
+    db.refresh(row)
+
+    return {
+        "status": 0,
+        "verification_id": str(row.id),
+        "expires_in_sec": PHONE_VERIFICATION_TTL_SECONDS,
+    }
+
+@app.post("/community/phone/verify", response_model=PhoneVerifyResponse)
+def community_phone_verify(req: PhoneVerifyRequest, db: Session = Depends(get_db)):
+    try:
+        vid = uuid.UUID(req.verification_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid verification_id")
+
+    row = db.query(Community_Phone_Verification).filter(Community_Phone_Verification.id == vid).first()
+    if not row:
+        return {"status": 1, "verified": False}
+
+    now = datetime.now(tz=timezone.utc)
+    if row.verified_at is not None:
+        return {"status": 0, "verified": True}
+    if row.expires_at is not None and row.expires_at <= now:
+        return {"status": 2, "verified": False}
+
+    attempts = int(getattr(row, "attempts", 0) or 0)
+    if attempts >= PHONE_VERIFICATION_MAX_ATTEMPTS:
+        return {"status": 3, "verified": False}
+
+    if _hash_code(req.code.strip()) != row.code_hash:
+        row.attempts = attempts + 1
+        db.add(row)
+        db.commit()
+        return {"status": 4, "verified": False}
+
+    row.verified_at = now
+    db.add(row)
+    db.commit()
+    return {"status": 0, "verified": True}
 
    
 @app.post("/community/signup")
@@ -541,6 +685,28 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     if req.phone_number is None:
         return {"status": 4}
 
+    # 휴대폰 인증 강제
+    digits = _normalize_phone(req.phone_number)
+    if not _is_valid_korean_phone(digits):
+        raise HTTPException(status_code=400, detail="invalid phone_number")
+
+    if not req.phone_verification_id:
+        return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
+    try:
+        vid = uuid.UUID(req.phone_verification_id)
+    except Exception:
+        return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
+
+    vrow = db.query(Community_Phone_Verification).filter(Community_Phone_Verification.id == vid).first()
+    now = datetime.now(tz=timezone.utc)
+    if (
+        (not vrow)
+        or (vrow.phone_number != digits)
+        or (vrow.verified_at is None)
+        or (vrow.expires_at is not None and vrow.expires_at <= now)
+    ):
+        return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
+
     if req.region is None:
         return {"status": 3}    
 
@@ -550,7 +716,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         username      = req.username,
         password_hash = pw_hash,
         name          = req.name,
-        phone_number  = req.phone_number,
+        phone_number  = digits,
         region        = req.region,  
         signup_date   = date.today(), 
         marketing_consent=bool(req.marketing_consent),
