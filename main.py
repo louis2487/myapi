@@ -611,6 +611,50 @@ class PhoneVerifyResponse(BaseModel):
     status: int
     verified: bool = False
 
+class FindUsernameRequest(BaseModel):
+    phone_number: str = Field(min_length=8, max_length=30)
+    phone_verification_id: str = Field(min_length=10, max_length=80)
+
+class FindUsernameResponse(BaseModel):
+    status: int
+    items: list[str] = Field(default_factory=list)
+
+class ResetPasswordRequest(BaseModel):
+    username: str = Field(min_length=2, max_length=50)
+    phone_number: str = Field(min_length=8, max_length=30)
+    phone_verification_id: str = Field(min_length=10, max_length=80)
+    new_password: str = Field(min_length=2, max_length=255)
+    new_password_confirm: str = Field(min_length=2, max_length=255)
+
+class ResetPasswordResponse(BaseModel):
+    status: int
+    detail: str | None = None
+
+def _require_verified_phone(db: Session, phone_number: str, phone_verification_id: str) -> str:
+    """
+    인증 완료된 휴대폰(verification_id + phone 매칭, 만료/검증 체크)을 강제하고
+    정규화된 phone digits를 반환합니다.
+    """
+    digits = _normalize_phone(phone_number)
+    if not _is_valid_korean_phone(digits):
+        raise HTTPException(status_code=400, detail="invalid phone_number")
+
+    try:
+        vid = uuid.UUID(phone_verification_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid phone_verification_id")
+
+    vrow = db.query(Community_Phone_Verification).filter(Community_Phone_Verification.id == vid).first()
+    now = datetime.now(tz=timezone.utc)
+    if (
+        (not vrow)
+        or (vrow.phone_number != digits)
+        or (vrow.verified_at is None)
+        or (vrow.expires_at is not None and vrow.expires_at <= now)
+    ):
+        raise HTTPException(status_code=400, detail="phone verification required")
+    return digits
+
 @app.post("/community/phone/send", response_model=PhoneSendResponse)
 def community_phone_send(req: PhoneSendRequest, db: Session = Depends(get_db)):
     digits = _normalize_phone(req.phone_number)
@@ -629,7 +673,7 @@ def community_phone_send(req: PhoneSendRequest, db: Session = Depends(get_db)):
     db.add(row)
     db.flush()  # id 생성
 
-    msg = f"[대원앱] 인증번호는 {code} 입니다."
+    msg = f"[분양프로] 인증번호는 {code} 입니다."
     try:
         _send_aligo_sms(digits, msg)
     except Exception:
@@ -676,6 +720,36 @@ def community_phone_verify(req: PhoneVerifyRequest, db: Session = Depends(get_db
     db.add(row)
     db.commit()
     return {"status": 0, "verified": True}
+
+@app.post("/community/account/find-username", response_model=FindUsernameResponse)
+def community_find_username(req: FindUsernameRequest, db: Session = Depends(get_db)):
+    digits = _require_verified_phone(db, req.phone_number, req.phone_verification_id)
+
+    users = db.query(Community_User).filter(Community_User.phone_number == digits).all()
+    if not users:
+        return {"status": 1, "items": []}
+
+    items = [u.username for u in users if u and u.username]
+    return {"status": 0, "items": items}
+
+@app.post("/community/account/reset-password", response_model=ResetPasswordResponse)
+def community_reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    if req.new_password != req.new_password_confirm:
+        return {"status": 2, "detail": "비밀번호와 비밀번호 확인이 일치하지 않습니다."}
+
+    digits = _require_verified_phone(db, req.phone_number, req.phone_verification_id)
+
+    user = db.query(Community_User).filter(Community_User.username == req.username).first()
+    if not user:
+        return {"status": 1, "detail": "사용자를 찾을 수 없습니다."}
+
+    if (user.phone_number or "") != digits:
+        return {"status": 3, "detail": "휴대폰 번호가 일치하지 않습니다."}
+
+    user.password_hash = hashlib.sha256(req.new_password.encode()).hexdigest()
+    db.add(user)
+    db.commit()
+    return {"status": 0}
 
    
 @app.post("/community/signup")
