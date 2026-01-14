@@ -30,6 +30,7 @@ import secrets
 from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 import openpyxl, tempfile
+from starlette.background import BackgroundTask
 from rss_service import fetch_rss_and_save, parse_pubdate
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
@@ -1634,6 +1635,7 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
         "signup_date": signup_date_str,
         # user_grade: 0-아마추어 / 1-세미프로 / 2-프로 / 3-마스터 / 4-레전드
         "user_grade": int(user.user_grade) if getattr(user, "user_grade", None) is not None else 0,
+        "is_owner": bool(getattr(user, "is_owner", False)),
         "posts": {
             "type1": counts[1],
             "type3": counts[3],
@@ -2986,22 +2988,79 @@ def list_comments(
 
 
 @app.get("/community/users/export")
-def export_users(db: Session = Depends(get_db)):
-    users = db.query(Community_User).all()
+def export_users(
+    me: Community_User = Depends(get_current_community_user),
+    db: Session = Depends(get_db),
+):
+    """
+    커뮤니티 사용자 목록을 엑셀(xlsx)로 내보냅니다.
+    - 로그인 필요(Authorization Bearer 토큰)
+    - Windows 환경에서도 파일이 손상되지 않도록, temp 파일 핸들 락을 피합니다.
+    """
+    # 필요 시 오너 전용으로 제한
+    is_owner = bool(getattr(me, "is_owner", False))
+    user_grade = int(getattr(me, "user_grade", 0) or 0)
+    if not (is_owner or user_grade >= 3):
+        raise HTTPException(status_code=403, detail="No permission")
+
+    users = db.query(Community_User).order_by(Community_User.id.asc()).all()
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Users"
 
-    ws.append(["ID", "Username", "Name", "Phone", "Region", "Signup Date"])
+    ws.append(
+        [
+            "ID",
+            "Username",
+            "Name",
+            "Phone",
+            "Region",
+            "Signup Date",
+            "Is Owner",
+            "User Grade",
+            "Point Balance",
+            "Cash Balance",
+            "Marketing Consent",
+            "Referral Code",
+        ]
+    )
 
     for u in users:
-        ws.append([u.id, u.username, u.name, u.phone_number, u.position, u.region, u.signup_date])
+        ws.append(
+            [
+                u.id,
+                u.username,
+                u.name,
+                u.phone_number,
+                u.region,
+                u.signup_date.isoformat() if getattr(u, "signup_date", None) else None,
+                bool(getattr(u, "is_owner", False)),
+                int(getattr(u, "user_grade", 0) or 0),
+                int(getattr(u, "point_balance", 0) or 0),
+                int(getattr(u, "cash_balance", 0) or 0),
+                bool(getattr(u, "marketing_consent", False)),
+                getattr(u, "referral_code", None),
+            ]
+        )
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(tmp.name)
+    # Windows에서 NamedTemporaryFile 핸들 락 이슈를 피하기 위해 mkstemp 사용
+    fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(tmp_path)
+    try:
+        wb.close()
+    except Exception:
+        pass
 
-    return FileResponse(tmp.name, filename=f"users_{date.today()}.xlsx")
+    download_name = f"users_{date.today().isoformat()}.xlsx"
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return FileResponse(
+        tmp_path,
+        filename=download_name,
+        media_type=media_type,
+        background=BackgroundTask(lambda p=tmp_path: os.path.exists(p) and os.remove(p)),
+    )
 
 
 class CommentUpdate(BaseModel):
