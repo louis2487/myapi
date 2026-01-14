@@ -1632,6 +1632,8 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
     return {
         "status": 0,
         "signup_date": signup_date_str,
+        # user_grade: 0-아마추어 / 1-세미프로 / 2-프로 / 3-마스터 / 4-레전드
+        "user_grade": int(user.user_grade) if getattr(user, "user_grade", None) is not None else 0,
         "posts": {
             "type1": counts[1],
             "type3": counts[3],
