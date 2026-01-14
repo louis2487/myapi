@@ -155,10 +155,54 @@ def _drop_all_constraints_on_table(table_name: str) -> None:
         # 제약조건 제거 실패해도 서버는 뜨게 하되, 로그는 남김
         print(f"[WARN] drop constraints failed for {table_name}: {e}")
 
+# --- schema sync helpers (no alembic) ---
+def _ensure_community_users_columns_and_indexes() -> None:
+    """
+    Alembic 없이 운영 중인 DB 스키마를 최소한으로 동기화합니다.
+    - community_users 신규 컬럼/인덱스가 없으면 생성
+    - 이미 존재하면 스킵(에러 없이 idempotent)
+    """
+    try:
+        with engine.begin() as conn:
+            # 테이블이 없으면 skip (create_all에서 생성될 수 있음)
+            exists = conn.execute(
+                text("SELECT to_regclass('public.community_users') IS NOT NULL")
+            ).scalar()
+            if not exists:
+                return
+
+            # 컬럼 추가 (PostgreSQL: ADD COLUMN IF NOT EXISTS 지원)
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.community_users
+                      ADD COLUMN IF NOT EXISTS last_recruit_posted_at timestamp with time zone NULL,
+                      ADD COLUMN IF NOT EXISTS user_grade smallint NOT NULL DEFAULT 0,
+                      ADD COLUMN IF NOT EXISTS is_owner boolean NOT NULL DEFAULT false;
+                    """
+                )
+            )
+
+            # 인덱스 추가
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_community_users_is_owner ON public.community_users (is_owner);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_community_users_user_grade ON public.community_users (user_grade);"
+                )
+            )
+    except Exception as e:
+        # 스키마 동기화 실패해도 서버는 뜨게 하되, 로그는 남김
+        print(f"[WARN] ensure community_users columns/indexes failed: {e}")
+
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
 _drop_all_constraints_on_table("cash")
+_ensure_community_users_columns_and_indexes()
 
 def get_db():
     db = SessionLocal()

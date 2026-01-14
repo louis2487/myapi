@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text, SmallInteger
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
 from pydantic import BaseModel, ConfigDict
@@ -104,6 +104,19 @@ class Community_User(Base):
     popup_last_seen_at = Column(DateTime(timezone=True), nullable=True)
     last_attendance_date = Column(Date, nullable=True)
     marketing_consent = Column(Boolean, nullable=False, server_default="false")
+
+    # --- 2026-01: 커뮤니티 운영/구인글 기능용 신규 필드 ---
+    # 마지막 구인글 작성 시각 (nullable)
+    last_recruit_posted_at = Column(DateTime(timezone=True), nullable=True)
+    # 유저 등급(0=기본) / NOT NULL DEFAULT 0
+    user_grade = Column(SmallInteger, nullable=False, server_default="0")
+    # 사업주 여부 / NOT NULL DEFAULT false
+    is_owner = Column(Boolean, nullable=False, server_default="false")
+
+    __table_args__ = (
+        Index("ix_community_users_is_owner", "is_owner"),
+        Index("ix_community_users_user_grade", "user_grade"),
+    )
 
 class Community_Phone_Verification(Base):
     """
