@@ -1680,6 +1680,46 @@ def split_address(addr: str):
     city = parts[1] if len(parts) > 1 else None
     return province, city
 
+
+# ---- 지역(시/도) 표기 정규화 ----
+# 앱/유저 설정(맞춤현장)에서 축약형("서울")과 정식명("서울특별시")이 혼재할 수 있어
+# 서버 필터는 둘 다 매칭되도록 후보군을 만들어 사용합니다.
+PROVINCE_SHORT_TO_FULL = {
+    "전체": "전체",
+    "서울": "서울특별시",
+    "경기": "경기도",
+    "인천": "인천광역시",
+    "강원": "강원특별자치도",
+    "충북": "충청북도",
+    "충남": "충청남도",
+    "대전": "대전광역시",
+    "세종": "세종특별자치시",
+    "경북": "경상북도",
+    "경남": "경상남도",
+    "부산": "부산광역시",
+    "대구": "대구광역시",
+    "전북": "전북특별자치도",
+    "전남": "전라남도",
+    "광주": "광주광역시",
+    "울산": "울산광역시",
+    "제주": "제주특별자치도",
+}
+
+
+def normalize_province_name(prov: str) -> str:
+    p = (prov or "").strip()
+    if not p:
+        return ""
+    return PROVINCE_SHORT_TO_FULL.get(p, p)
+
+
+def province_candidates(prov: str) -> list[str]:
+    p = (prov or "").strip()
+    if not p:
+        return []
+    full = normalize_province_name(p)
+    return [p, full] if full and full != p else [p]
+
 StatusLiteral = Literal["published", "closed"]
 
 class PostCreate(BaseModel):
@@ -2392,12 +2432,13 @@ def list_posts_custom_by_user_settings(
                 conds = []
                 break
 
+            prov_in = Community_Post.province.in_(province_candidates(prov))
             if city == "전체":
-                conds.append(Community_Post.province == prov)
+                conds.append(prov_in)
             else:
                 conds.append(
                     and_(
-                        Community_Post.province == prov,
+                        prov_in,
                         or_(
                             Community_Post.city == city,
                             Community_Post.city.like(f"%{city}%"),
@@ -2443,6 +2484,7 @@ def list_posts(
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
     limit: int = Query(100, ge=1, le=100),
     status: Optional[str] = Query(None, description="published | closed"),
+    regions: Optional[str] = Query(None, description="지역 필터(복수): 콤마로 구분. 예) 서울특별시,경기도 수원시"),
     province: Optional[str] = Query(None, description="지역 필터: 시/도"),
     city: Optional[str] = Query(None, description="지역 필터: 시/군/구"),
     db: Session = Depends(get_db),
@@ -2457,8 +2499,40 @@ def list_posts(
         q = q.filter(Community_Post.status == status)
 
     # 지역 필터링 (서버 측)
-    if province and province != "전체":
-        q = q.filter(Community_Post.province == province)
+    # - regions(복수)가 우선
+    # - 없으면 기존 province/city 단일 필터 유지
+    if regions:
+        codes = [x.strip() for x in regions.split(",") if x.strip()]
+        if codes and "전체" not in codes:
+            conds = []
+            for code in codes:
+                parts = code.split()
+                if not parts:
+                    continue
+                prov = parts[0]
+                c = "전체" if len(parts) == 1 else " ".join(parts[1:]).strip() or "전체"
+
+                if prov == "전체":
+                    conds = []
+                    break
+
+                prov_in = Community_Post.province.in_(province_candidates(prov))
+                if c == "전체":
+                    conds.append(prov_in)
+                else:
+                    conds.append(
+                        and_(
+                            prov_in,
+                            or_(
+                                Community_Post.city == c,
+                                Community_Post.city.like(f"%{c}%")
+                            )
+                        )
+                    )
+            if conds:
+                q = q.filter(or_(*conds))
+    elif province and province != "전체":
+        q = q.filter(Community_Post.province.in_(province_candidates(province)))
         if city and city != "전체":
             # city 필터링 (정확히 일치하거나 부분 일치)
             q = q.filter(
@@ -2565,6 +2639,7 @@ def list_posts_plus(
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
     limit: int = Query(100, ge=1, le=100),
     status: Optional[str] = Query(None, description="published | closed"),
+    regions: Optional[str] = Query(None, description="지역 필터(복수): 콤마로 구분. 예) 서울특별시,경기도 수원시"),
     province: Optional[str] = Query(None, description="지역 필터: 시/도"),
     city: Optional[str] = Query(None, description="지역 필터: 시/군/구"),
     db: Session = Depends(get_db),
@@ -2579,8 +2654,38 @@ def list_posts_plus(
         q = q.filter(Community_Post.status == status)
 
     # 지역 필터링 (서버 측)
-    if province and province != "전체":
-        q = q.filter(Community_Post.province == province)
+    if regions:
+        codes = [x.strip() for x in regions.split(",") if x.strip()]
+        if codes and "전체" not in codes:
+            conds = []
+            for code in codes:
+                parts = code.split()
+                if not parts:
+                    continue
+                prov = parts[0]
+                c = "전체" if len(parts) == 1 else " ".join(parts[1:]).strip() or "전체"
+
+                if prov == "전체":
+                    conds = []
+                    break
+
+                prov_in = Community_Post.province.in_(province_candidates(prov))
+                if c == "전체":
+                    conds.append(prov_in)
+                else:
+                    conds.append(
+                        and_(
+                            prov_in,
+                            or_(
+                                Community_Post.city == c,
+                                Community_Post.city.like(f"%{c}%")
+                            )
+                        )
+                    )
+            if conds:
+                q = q.filter(or_(*conds))
+    elif province and province != "전체":
+        q = q.filter(Community_Post.province.in_(province_candidates(province)))
         if city and city != "전체":
             # city 필터링 (정확히 일치하거나 부분 일치)
             q = q.filter(
