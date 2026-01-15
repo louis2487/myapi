@@ -987,6 +987,48 @@ def list_referrals_by_referrer(username: str, db: Session = Depends(get_db)):
     return {"status": 0, "items": items}
 
 
+def _mask_nickname(value: str) -> str:
+    """
+    닉네임을 앞 2글자만 보여주고 나머지는 '*'로 마스킹합니다.
+    예) '홍길동' -> '홍길*', 'ab' -> 'ab', 'a' -> 'a'
+    """
+    s = (value or "").strip()
+    if len(s) <= 2:
+        return s
+    return s[:2] + ("*" * (len(s) - 2))
+
+
+@app.get("/community/referrals/ranking")
+def referral_ranking(db: Session = Depends(get_db)):
+    """
+    추천인 기준 랭킹.
+    응답 형식: 순위 / 닉네임(2글자 + 마스킹) / 추천인 수
+    - 순위는 제한 없이(서버에서 limit 걸지 않음) 반환합니다.
+    """
+    rows = (
+        db.query(
+            Community_User.id.label("user_id"),
+            Community_User.username.label("username"),
+            func.count(Referral.id).label("referral_count"),
+        )
+        .join(Referral, Referral.referrer_user_id == Community_User.id)
+        .group_by(Community_User.id, Community_User.username)
+        .order_by(func.count(Referral.id).desc(), Community_User.id.asc())
+        .all()
+    )
+
+    items = [
+        {
+            "rank": idx,
+            "nickname": _mask_nickname(r.username or ""),
+            "referral_count": int(r.referral_count or 0),
+        }
+        for idx, r in enumerate(rows, start=1)
+    ]
+
+    return {"status": 0, "items": items}
+
+
 @app.get("/community/points/{username}")
 def list_points(username: str, db: Session = Depends(get_db)):
     """
