@@ -892,6 +892,11 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             status_code=500,
             detail="회원가입 처리 중 오류가 발생했습니다"
         )
+
+    # 신규가입 보너스: 추천인코드와 무관하게 500P 지급
+    SIGNUP_BONUS = 500
+    user.point_balance = int(user.point_balance or 0) + SIGNUP_BONUS
+    db.add(Point(user_id=user.id, reason="signup_bonus", amount=SIGNUP_BONUS))
     
     # 추천인코드가 있으면 referral/point 기록 + 포인트 지급
     input_code = (req.referral_code or "").strip()
