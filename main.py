@@ -897,6 +897,9 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     SIGNUP_BONUS = 500
     user.point_balance = int(user.point_balance or 0) + SIGNUP_BONUS
     db.add(Point(user_id=user.id, reason="signup_bonus", amount=SIGNUP_BONUS))
+
+    referral_bonus_referred_amount = 0
+    referral_bonus_referrer_amount = 0
     
     # 추천인코드가 있으면 referral/point 기록 + 포인트 지급
     input_code = (req.referral_code or "").strip()
@@ -925,6 +928,8 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             )
 
             bonus = 1000
+            referral_bonus_referred_amount = bonus
+            referral_bonus_referrer_amount = bonus
 
             # 추천인 포인트 적립
             referrer.point_balance = int(referrer.point_balance or 0) + bonus
@@ -933,6 +938,22 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             # 피추천인 포인트 적립
             user.point_balance = int(user.point_balance or 0) + bonus
             db.add(Point(user_id=user.id, reason="referral_bonus_referred", amount=bonus))
+
+            # 추천인에게 "미확인 알림" 누적(앱 실행 시 Alert로 보여주기 위함)
+            db.add(
+                Notification(
+                    user_id=int(referrer.id),
+                    type="referral",
+                    title="추천인 가입 포인트 지급",
+                    body=f"{user.username}님이 추천인코드로 가입하여 {bonus}점이 지급되었습니다.",
+                    data={
+                        "referred_username": user.username,
+                        "amount": bonus,
+                        "reason": "referral_bonus_referrer",
+                    },
+                    is_read=False,
+                )
+            )
 
         except IntegrityError as e:
             # 사용자 요청에 따라 referral/point 테이블 제약조건을 제거하므로
@@ -955,7 +976,12 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    return {"status": 0}
+    return {
+        "status": 0,
+        "signup_bonus_amount": SIGNUP_BONUS,
+        "referral_bonus_referred_amount": referral_bonus_referred_amount,
+        "referral_bonus_referrer_amount": referral_bonus_referrer_amount,
+    }
 
 
 class AppVersionOut(BaseModel):
@@ -3523,7 +3549,8 @@ def create_notification(
     title: str,
     body: str,
     type: str = "system",
-    data: dict = None
+    data: dict = None,
+    commit: bool = True,
 ):
     noti = Notification(
         user_id=user_id,
@@ -3533,8 +3560,9 @@ def create_notification(
         data=data or {}
     )
     db.add(noti)
-    db.commit()
-    db.refresh(noti)
+    if commit:
+        db.commit()
+        db.refresh(noti)
     return noti
 
 
