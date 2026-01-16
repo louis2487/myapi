@@ -958,6 +958,97 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     return {"status": 0}
 
 
+class AppVersionOut(BaseModel):
+    status: int = 0
+    platform: Literal["android", "ios"]
+    current_version: Optional[str] = None
+    latest_version: str
+    min_supported_version: str
+    force_update: bool
+    store_url: Optional[str] = None
+    message: Optional[str] = None
+
+
+def _version_parts(v: str) -> List[int]:
+    """
+    "1.2.3" 형태 버전을 비교 가능한 숫자 배열로 변환합니다.
+    - 숫자 이외 문자는 무시(예: "1.0.0-beta" -> 1.0.0)
+    """
+    s = (v or "").strip()
+    if not s:
+        return [0]
+    parts = s.split(".")
+    nums: List[int] = []
+    for p in parts:
+        m = re.match(r"(\d+)", (p or "").strip())
+        nums.append(int(m.group(1)) if m else 0)
+    # trailing 0 정리(1.0.0 == 1)
+    while len(nums) > 1 and nums[-1] == 0:
+        nums.pop()
+    return nums or [0]
+
+
+def _is_version_lt(a: str, b: str) -> bool:
+    pa = _version_parts(a)
+    pb = _version_parts(b)
+    n = max(len(pa), len(pb))
+    for i in range(n):
+        av = pa[i] if i < len(pa) else 0
+        bv = pb[i] if i < len(pb) else 0
+        if av < bv:
+            return True
+        if av > bv:
+            return False
+    return False
+
+
+@app.get("/community/app/version", response_model=AppVersionOut)
+def community_app_version(
+    platform: Literal["android", "ios"] = Query(...),
+    current_version: Optional[str] = Query(None),
+):
+    """
+    앱 시작 시 버전 체크(강제 업데이트용).
+    - 최신 버전이 아니면 force_update=True
+    환경변수:
+      - APP_ANDROID_LATEST_VERSION / APP_ANDROID_MIN_SUPPORTED_VERSION / APP_ANDROID_STORE_URL / APP_ANDROID_PACKAGE
+      - APP_IOS_LATEST_VERSION / APP_IOS_MIN_SUPPORTED_VERSION / APP_IOS_STORE_URL
+      - APP_FORCE_UPDATE_MESSAGE
+    """
+    msg = (os.getenv("APP_FORCE_UPDATE_MESSAGE", "") or "").strip() or "최신 버전으로 업데이트 후 이용해 주세요."
+
+    if platform == "android":
+        latest = (os.getenv("APP_ANDROID_LATEST_VERSION", "") or "").strip()
+        min_supported = (os.getenv("APP_ANDROID_MIN_SUPPORTED_VERSION", "") or "").strip()
+        pkg = (os.getenv("APP_ANDROID_PACKAGE", "") or "").strip() or "com.smartgauge.bunyangpro"
+        store_url = (os.getenv("APP_ANDROID_STORE_URL", "") or "").strip() or f"market://details?id={pkg}"
+    else:
+        latest = (os.getenv("APP_IOS_LATEST_VERSION", "") or "").strip()
+        min_supported = (os.getenv("APP_IOS_MIN_SUPPORTED_VERSION", "") or "").strip()
+        store_url = (os.getenv("APP_IOS_STORE_URL", "") or "").strip() or None
+
+    # 값이 비어있으면 안전한 기본값(현재 앱 설정 버전과 맞춰둠)
+    latest = latest or min_supported or "1.0.1"
+    min_supported = min_supported or latest
+
+    force_update = False
+    if current_version:
+        # 요구사항: 최신 버전이 아니면 강제 업데이트
+        if _is_version_lt(current_version, latest):
+            force_update = True
+
+    return {
+        "status": 0,
+        "platform": platform,
+        "current_version": current_version,
+        "latest_version": latest,
+        "min_supported_version": min_supported,
+        "force_update": force_update,
+        "store_url": store_url,
+        "message": msg,
+    }
+
+
 @app.get("/community/referrals/by-referrer/{username}")
 def list_referrals_by_referrer(username: str, db: Session = Depends(get_db)):
     """
@@ -2074,28 +2165,9 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
                 detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
             )
 
-    # card_type: 1(유료1), 2(유료2), 3(무료) - 미지정이면 기본 3
-    try:
-        card_type = int(body.card_type) if body.card_type is not None else 3
-    except Exception:
-        card_type = 3
-
-    if card_type not in (1, 2, 3):
-        card_type = 3
-
-    cost = 0
-    if card_type == 1:
-        cost = 80000
-    elif card_type == 2:
-        cost = 30000
-
-    # 유료 유형일 때 캐시 차감 + 원장 기록
-    if cost > 0:
-        balance = int(user.cash_balance or 0)
-        if balance < cost:
-            raise HTTPException(status_code=400, detail="캐시가 부족합니다.")
-        user.cash_balance = balance - cost
-        db.add(Cash(user_id=userId, reason=f"post_card_type_{card_type}", amount=-cost))
+    # ---- 구인글(post_type=1) 등록 정책 ----
+    # 요청사항: 캐시 차감 없이, 무조건 1유형(card_type=1)으로 등록
+    card_type = 1
 
     post = Community_Post(
         user_id=userId,
@@ -2259,26 +2331,8 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
                     detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
                 )
 
-        # card_type 결제 규칙은 /community/posts/{username} 와 동일하게 적용
-        try:
-            card_type = int(body.card_type) if body.card_type is not None else 3
-        except Exception:
-            card_type = 3
-        if card_type not in (1, 2, 3):
-            card_type = 3
-
-        cost = 0
-        if card_type == 1:
-            cost = 80000
-        elif card_type == 2:
-            cost = 30000
-
-        if cost > 0:
-            balance = int(user.cash_balance or 0)
-            if balance < cost:
-                raise HTTPException(status_code=400, detail="캐시가 부족합니다.")
-            user.cash_balance = balance - cost
-            db.add(Cash(user_id=userId, reason=f"post_card_type_{card_type}", amount=-cost))
+        # 구인글(post_type=1): 캐시 차감 없이 1유형으로 고정
+        card_type = 1
 
         # 보상/작성시각 갱신
         user.point_balance = int(user.point_balance or 0) + 1000
