@@ -1161,9 +1161,15 @@ def community_app_version(
         min_supported = (os.getenv("APP_IOS_MIN_SUPPORTED_VERSION", "") or "").strip()
         store_url = (os.getenv("APP_IOS_STORE_URL", "") or "").strip() or None
 
-    # 값이 비어있으면 안전한 기본값(현재 앱 설정 버전과 맞춰둠)
-    latest = latest or min_supported or "1.0.1"
-    min_supported = min_supported or latest
+    # 값이 비어있으면 안전한 기본값으로 보정
+    # - 운영에서 환경변수 설정이 누락되면, 의도치 않게 전 사용자 강제업데이트가 걸릴 수 있어
+    #   기본값은 "현재 버전 == 최신"으로 간주합니다.
+    if not latest and not min_supported:
+        latest = current_version or "0.0.0"
+        min_supported = latest
+    else:
+        latest = latest or min_supported
+        min_supported = min_supported or latest
 
     force_update = False
     if current_version:
@@ -1259,6 +1265,21 @@ def list_points(username: str, db: Session = Depends(get_db)):
     """
     내 포인트 적립/사용 내역(원장).
     """
+    def _to_kst_iso(dt: datetime | None) -> str | None:
+        # tzinfo 없으면 UTC로 간주 후 KST(UTC+9)로 변환
+        if not dt:
+            return None
+        try:
+            if getattr(dt, "tzinfo", None) is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            kst = timezone(timedelta(hours=9))
+            return dt.astimezone(kst).isoformat()
+        except Exception:
+            try:
+                return dt.isoformat()
+            except Exception:
+                return None
+
     user = db.query(Community_User).filter(Community_User.username == username).first()
     if not user:
         return {"status": 1, "items": []}
@@ -1276,7 +1297,7 @@ def list_points(username: str, db: Session = Depends(get_db)):
             "id": p.id,
             "reason": p.reason,
             "amount": int(p.amount),
-            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "created_at": _to_kst_iso(p.created_at),
         }
         for p in rows
     ]
@@ -1302,16 +1323,12 @@ def _kst_today_bounds_utc():
 @app.get("/community/points/attendance/status/{username}")
 def attendance_status(
     username: str,
-    me: Community_User = Depends(get_current_community_user),
     db: Session = Depends(get_db),
 ):
     """
     출석체크(일 1회) 수령 여부 조회.
     - KST 기준 '오늘'에 attendance_daily 기록이 있으면 claimed=True
     """
-    if me.username != username:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission")
-
     user = db.query(Community_User).filter(Community_User.username == username).first()
     if not user:
         return {"status": 1, "claimed": False}
@@ -1340,16 +1357,12 @@ def attendance_status(
 @app.post("/community/points/attendance/claim/{username}")
 def attendance_claim(
     username: str,
-    me: Community_User = Depends(get_current_community_user),
     db: Session = Depends(get_db),
 ):
     """
     출석체크 포인트 지급 (KST 기준 하루 1회, 200P).
     - point 테이블에 기록되고 /community/points/{username}에서 조회 가능
     """
-    if me.username != username:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission")
-
     # 동시 클릭(중복 지급) 방지: user row를 잠그고 확인 후 지급
     user = (
         db.query(Community_User)
@@ -1427,6 +1440,21 @@ def list_cash(username: str, db: Session = Depends(get_db)):
     """
     내 캐시 충전/사용 내역(원장).
     """
+    def _to_kst_iso(dt: datetime | None) -> str | None:
+        # tzinfo 없으면 UTC로 간주 후 KST(UTC+9)로 변환
+        if not dt:
+            return None
+        try:
+            if getattr(dt, "tzinfo", None) is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            kst = timezone(timedelta(hours=9))
+            return dt.astimezone(kst).isoformat()
+        except Exception:
+            try:
+                return dt.isoformat()
+            except Exception:
+                return None
+
     user = db.query(Community_User).filter(Community_User.username == username).first()
     if not user:
         return {"status": 1, "items": []}
@@ -1444,7 +1472,7 @@ def list_cash(username: str, db: Session = Depends(get_db)):
             "id": c.id,
             "reason": c.reason,
             "amount": int(c.amount),
-            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "created_at": _to_kst_iso(c.created_at),
         }
         for c in rows
     ]
@@ -2634,16 +2662,16 @@ class PostsOut2(BaseModel):
 
 @app.get("/community/posts/custom", response_model=PostsOut2)
 def list_posts_custom_by_user_settings(
+    username: Optional[str] = Query(None, description="맞춤조건/좋아요 계산용 유저명"),
     cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
     limit: int = Query(100, ge=1, le=100),
     status: Optional[str] = Query(None, description="published | closed"),
-    me: Community_User = Depends(get_current_community_user),
     db: Session = Depends(get_db),
 ):
     """
     맞춤현장(유저 설정) 기반 구인글(post_type=1) 목록.
 
-    - 로그인 필요(Authorization Bearer 토큰)
+    - (B안) 토큰 인증 제거: username 파라미터로 유저 설정을 조회
     - 필터 기준:
       - community_users.custom_industry_codes: job_industry(문자열/CSV)에 포함되는지 LIKE로 매칭
       - community_users.custom_region_codes:
@@ -2651,6 +2679,14 @@ def list_posts_custom_by_user_settings(
         - "서울" => province="서울"
         - "서울 강남구" => province="서울" AND city LIKE "%강남구%"
     """
+    # 토큰 인증을 제거했으므로, username이 없으면 필터 조건을 알 수 없어 빈 목록 반환
+    if not username:
+        return PostsOut2(items=[], next_cursor=None)
+
+    user = db.query(Community_User).filter(Community_User.username == username).first()
+    if not user:
+        return PostsOut2(items=[], next_cursor=None)
+
     q = (
         db.query(Community_Post)
         .filter(Community_Post.post_type == 1)
@@ -2661,14 +2697,14 @@ def list_posts_custom_by_user_settings(
         q = q.filter(Community_Post.status == status)
 
     # --- 산업(업종) 필터 ---
-    industries = [str(x).strip() for x in (getattr(me, "custom_industry_codes", None) or []) if str(x).strip()]
+    industries = [str(x).strip() for x in (getattr(user, "custom_industry_codes", None) or []) if str(x).strip()]
     if industries and "전체" not in industries:
         q = q.filter(
             or_(*[Community_Post.job_industry.ilike(f"%{ind}%") for ind in industries])
         )
 
     # --- 지역 필터 ---
-    regions = [str(x).strip() for x in (getattr(me, "custom_region_codes", None) or []) if str(x).strip()]
+    regions = [str(x).strip() for x in (getattr(user, "custom_region_codes", None) or []) if str(x).strip()]
     if regions and "전체" not in regions:
         conds = []
         for code in regions:
@@ -2708,13 +2744,13 @@ def list_posts_custom_by_user_settings(
 
     rows = q.limit(limit).all()
 
-    # 좋아요 여부는 me.username 기준으로 계산
+    # 좋아요 여부는 username 기준으로 계산
     liked_ids = set()
-    if rows and me.username:
+    if rows and username:
         post_ids = [p.id for p in rows]
         liked_rows = (
             db.query(Post_Like.post_id)
-            .filter(Post_Like.username == me.username, Post_Like.post_id.in_(post_ids))
+            .filter(Post_Like.username == username, Post_Like.post_id.in_(post_ids))
             .all()
         )
         liked_ids = {pid for (pid,) in liked_rows}
