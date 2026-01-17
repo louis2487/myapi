@@ -135,6 +135,22 @@ class Community_Phone_Verification(Base):
 
     attempts = Column(Integer, nullable=False, server_default="0")
 
+class Phone(Base):
+    """
+    휴대폰 번호 영구 저장(추천인 시스템 남용 방지용 SSOT).
+    - 요구사항: create table if not exists phone (id bigserial pk, phone text not null, created_at timestamptz default now())
+    - 제약조건(UNIQUE)은 두지 않음(요구사항 기준). 앱 로직에서 중복 삽입을 방지합니다.
+    """
+    __tablename__ = "phone"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    phone = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_phone_phone", "phone"),
+    )
+
 class Community_Post(Base):
     __tablename__ = "community_posts"
     id = Column(Integer, primary_key=True, index=True)

@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Phone_Verification, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Phone_Verification, Phone, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_, text
@@ -203,11 +203,39 @@ def _ensure_community_users_columns_and_indexes() -> None:
         # 스키마 동기화 실패해도 서버는 뜨게 하되, 로그는 남김
         print(f"[WARN] ensure community_users columns/indexes failed: {e}")
 
+def _ensure_phone_table() -> None:
+    """
+    Alembic 없이 phone 테이블을 생성/동기화합니다.
+    요구 스키마:
+      create table if not exists phone (
+        id         bigserial primary key,
+        phone      text not null,
+        created_at timestamptz not null default now()
+      );
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.phone (
+                      id bigserial PRIMARY KEY,
+                      phone text NOT NULL,
+                      created_at timestamptz NOT NULL DEFAULT now()
+                    );
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_phone_phone ON public.phone (phone);"))
+    except Exception as e:
+        print(f"[WARN] ensure phone table failed: {e}")
+
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
 _drop_all_constraints_on_table("cash")
 _ensure_community_users_columns_and_indexes()
+_ensure_phone_table()
 
 def get_db():
     db = SessionLocal()
@@ -863,6 +891,14 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     if req.region is None:
         return {"status": 3}    
 
+    # phone 테이블 기준 "기존에 사용된 번호"인지 확인 (추천인 시스템 차단용)
+    phone_already_saved = (
+        db.query(Phone.id)
+        .filter(Phone.phone == digits)
+        .first()
+        is not None
+    )
+
     pw_hash = hashlib.sha256(req.password.encode()).hexdigest()
 
     user = Community_User(
@@ -893,17 +929,28 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             detail="회원가입 처리 중 오류가 발생했습니다"
         )
 
-    # 신규가입 보너스: 추천인코드와 무관하게 500P 지급
-    SIGNUP_BONUS = 500
-    user.point_balance = int(user.point_balance or 0) + SIGNUP_BONUS
-    db.add(Point(user_id=user.id, reason="signup_bonus", amount=SIGNUP_BONUS))
+    # phone 테이블에 번호 영구 저장 (중복이면 삽입 스킵)
+    if not phone_already_saved:
+        db.add(Phone(phone=digits))
 
+    SIGNUP_BONUS = 500
+    signup_bonus_amount = 0
     referral_bonus_referred_amount = 0
     referral_bonus_referrer_amount = 0
-    
-    # 추천인코드가 있으면 referral/point 기록 + 포인트 지급
+
     input_code = (req.referral_code or "").strip()
-    if input_code:
+
+    # 정책:
+    # - 추천인코드 미기입 시에만 가입 포인트 500P 지급
+    # - 추천인코드 기입 + (phone 테이블에 없는 번호)일 때만 추천인 시스템(각 1000P) 적용
+    # - 추천인코드 기입했더라도, phone 테이블에 이미 저장된 번호면 추천인 시스템은 "완전 미적용"(코드 검증/포인트/원장/알림 모두 스킵)
+    if not input_code:
+        signup_bonus_amount = SIGNUP_BONUS
+        user.point_balance = int(user.point_balance or 0) + SIGNUP_BONUS
+        db.add(Point(user_id=user.id, reason="signup_bonus", amount=SIGNUP_BONUS))
+    
+    # 추천인코드가 있을 때: phone 중복이면 "추천인 시스템 완전 미적용"
+    if input_code and (not phone_already_saved):
         # 본인 코드로 추천 방지(가입 직후 생성된 코드와 동일할 가능성도 있어 체크)
         if user.referral_code and input_code == user.referral_code:
             db.rollback()
@@ -978,7 +1025,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
 
     return {
         "status": 0,
-        "signup_bonus_amount": SIGNUP_BONUS,
+        "signup_bonus_amount": signup_bonus_amount,
         "referral_bonus_referred_amount": referral_bonus_referred_amount,
         "referral_bonus_referrer_amount": referral_bonus_referrer_amount,
     }
