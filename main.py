@@ -1842,6 +1842,14 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
     for post_type, cnt in rows:
         counts[post_type] = cnt
 
+    # 내가 추천한 회원 수
+    referral_count = (
+        db.query(func.count(Referral.id))
+        .filter(Referral.referrer_user_id == user.id)
+        .scalar()
+        or 0
+    )
+
     # signup_date를 문자열로 변환 (None이면 None 유지)
     signup_date_str = user.signup_date.isoformat() if user.signup_date else None
     
@@ -1860,6 +1868,7 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
         "cash_balance": user.cash_balance if user.cash_balance is not None else 0,
         "admin_acknowledged": user.admin_acknowledged if user.admin_acknowledged is not None else False,
         "referral_code": user.referral_code,
+        "referral_count": int(referral_count),
     }
 
 
