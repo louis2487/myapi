@@ -52,6 +52,67 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 SECRET_RSS_TOKEN = "rss-secret-token"
 
+# -------------------- Community Post card_type rollover --------------------
+# 요구사항:
+# - 구인글(post_type=1)은 write.tsx에서 항상 card_type=1로 등록됨
+# - 서버에서 card_type=1 글이 30개 초과 시: 가장 오래된 1유형을 2유형으로 변경
+# - 서버에서 card_type=2 글이 70개 초과 시: 가장 오래된 2유형을 3유형으로 변경
+CARD1_MAX = 30
+CARD2_MAX = 70
+
+def _rollover_recruit_card_types(db: Session) -> None:
+    """
+    구인글(post_type=1) 카드 타입을 개수 제한에 맞춰 롤오버합니다.
+    - card_type=1 -> 2 (30개 초과분을 오래된 순으로)
+    - card_type=2 -> 3 (70개 초과분을 오래된 순으로)
+    같은 트랜잭션 안에서 호출되어야 합니다.
+    """
+    # 1유형: 30개 유지
+    while True:
+        c1 = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .scalar()
+            or 0
+        )
+        if c1 <= CARD1_MAX:
+            break
+
+        oldest1 = (
+            db.query(Community_Post)
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+            .with_for_update()
+            .first()
+        )
+        if not oldest1:
+            break
+        oldest1.card_type = 2
+        db.add(oldest1)
+
+    # 2유형: 70개 유지 (초과분을 3유형으로)
+    while True:
+        c2 = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .scalar()
+            or 0
+        )
+        if c2 <= CARD2_MAX:
+            break
+
+        oldest2 = (
+            db.query(Community_Post)
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+            .with_for_update()
+            .first()
+        )
+        if not oldest2:
+            break
+        oldest2.card_type = 3
+        db.add(oldest2)
+
 # -------------------- TossPayments (SSOT) --------------------
 # clientKey: 결제 페이지(HTML)에서만 사용
 # secretKey: 서버에서 confirm 호출에만 사용 (절대 앱/웹에 노출 금지)
@@ -2317,6 +2378,8 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
     db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
 
     db.add(post)
+    db.flush()  # created_at/id 확정 후 롤오버 처리
+    _rollover_recruit_card_types(db)
     db.commit()
     db.refresh(post)
 
@@ -2482,6 +2545,10 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     )
    
     db.add(post)
+    db.flush()
+    # 구인글(post_type=1)인 경우에만 카드 타입 롤오버 적용
+    if int(post_type) == 1:
+        _rollover_recruit_card_types(db)
     db.commit()
     db.refresh(post)
 
