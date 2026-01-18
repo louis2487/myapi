@@ -82,6 +82,10 @@ def _rollover_recruit_card_types(db: Session) -> None:
             db.query(Community_Post)
             .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
             .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+            # Community_Post.author 가 lazy="joined"라 LEFT OUTER JOIN이 붙음.
+            # PostgreSQL은 OUTER JOIN의 nullable side에 FOR UPDATE를 적용할 수 없어 500이 남.
+            # 롤오버는 Post row만 잠그면 되므로 eager load를 끄고 row lock만 수행.
+            .enable_eagerloads(False)
             .with_for_update()
             .first()
         )
@@ -105,6 +109,7 @@ def _rollover_recruit_card_types(db: Session) -> None:
             db.query(Community_Post)
             .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
             .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+            .enable_eagerloads(False)
             .with_for_update()
             .first()
         )
