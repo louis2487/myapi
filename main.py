@@ -264,6 +264,76 @@ def _ensure_community_users_columns_and_indexes() -> None:
         # 스키마 동기화 실패해도 서버는 뜨게 하되, 로그는 남김
         print(f"[WARN] ensure community_users columns/indexes failed: {e}")
 
+def _ensure_community_posts_columns() -> None:
+    """
+    Alembic 없이 운영 중인 DB 스키마를 최소한으로 동기화합니다.
+    - community_posts에 필요한 컬럼이 없으면 생성(구인글 등록/수정 시 500 방지)
+    - 이미 존재하면 스킵(에러 없이 idempotent)
+
+    주의: PostgreSQL 전용 구문(to_regclass / ADD COLUMN IF NOT EXISTS)을 사용합니다.
+    """
+    try:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text("SELECT to_regclass('public.community_posts') IS NOT NULL")
+            ).scalar()
+            if not exists:
+                return
+
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.community_posts
+                      ADD COLUMN IF NOT EXISTS workplace_lat double precision NULL,
+                      ADD COLUMN IF NOT EXISTS workplace_lng double precision NULL,
+                      ADD COLUMN IF NOT EXISTS business_lat double precision NULL,
+                      ADD COLUMN IF NOT EXISTS business_lng double precision NULL,
+
+                      ADD COLUMN IF NOT EXISTS highlight_color varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS highlight_content varchar(255) NULL,
+
+                      ADD COLUMN IF NOT EXISTS total_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS branch_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS leader_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS member_use boolean NULL,
+
+                      ADD COLUMN IF NOT EXISTS total_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS branch_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS leader_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS member_fee varchar(255) NULL,
+
+                      ADD COLUMN IF NOT EXISTS pay_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS meal_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS house_use boolean NULL,
+
+                      ADD COLUMN IF NOT EXISTS pay_sup varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS meal_sup boolean NULL,
+                      ADD COLUMN IF NOT EXISTS house_sup varchar(255) NULL,
+
+                      ADD COLUMN IF NOT EXISTS item1_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS item1_type varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item1_sup varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item2_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS item2_type varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item2_sup varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item3_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS item3_type varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item3_sup varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item4_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS item4_type varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS item4_sup varchar(255) NULL,
+
+                      ADD COLUMN IF NOT EXISTS agent varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS post_type double precision NULL,
+                      ADD COLUMN IF NOT EXISTS card_type double precision NULL,
+
+                      ADD COLUMN IF NOT EXISTS status varchar(20) NOT NULL DEFAULT 'published';
+                    """
+                )
+            )
+    except Exception as e:
+        print(f"[WARN] ensure community_posts columns failed: {e}")
+
 def _ensure_phone_table() -> None:
     """
     Alembic 없이 phone 테이블을 생성/동기화합니다.
@@ -296,6 +366,7 @@ _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
 _drop_all_constraints_on_table("cash")
 _ensure_community_users_columns_and_indexes()
+_ensure_community_posts_columns()
 _ensure_phone_table()
 
 def get_db():
