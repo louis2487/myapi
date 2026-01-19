@@ -3535,20 +3535,13 @@ def list_comments(
 
 @app.get("/community/users/export")
 def export_users(
-    me: Community_User = Depends(get_current_community_user),
     db: Session = Depends(get_db),
 ):
     """
     커뮤니티 사용자 목록을 엑셀(xlsx)로 내보냅니다.
-    - 로그인 필요(Authorization Bearer 토큰)
+    - 인증 없이 다운로드 가능
     - Windows 환경에서도 파일이 손상되지 않도록, temp 파일 핸들 락을 피합니다.
     """
-    # 필요 시 오너 전용으로 제한
-    is_owner = bool(getattr(me, "is_owner", False))
-    user_grade = int(getattr(me, "user_grade", 0) or 0)
-    if not (is_owner or user_grade >= 3):
-        raise HTTPException(status_code=403, detail="No permission")
-
     users = db.query(Community_User).order_by(Community_User.id.asc()).all()
 
     wb = openpyxl.Workbook()
