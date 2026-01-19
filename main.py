@@ -60,6 +60,78 @@ SECRET_RSS_TOKEN = "rss-secret-token"
 CARD1_MAX = 30
 CARD2_MAX = 70
 
+GRADE_REWARD_BY_GRADE: dict[int, int] = {
+    1: 10000,
+    2: 30000,
+    3: 60000,
+    4: 100000,
+}
+
+def _grade_from_referral_count(referral_count: int) -> int:
+    """
+    추천인 수 기준 user_grade 자동 등업.
+    user_grade:
+      0: 기본(아마추어)
+      1: 10명 이상
+      2: 30명 이상
+      3: 60명 이상
+      4: 100명 이상
+    """
+    c = int(referral_count or 0)
+    if c >= 100:
+        return 4
+    if c >= 60:
+        return 3
+    if c >= 30:
+        return 2
+    if c >= 10:
+        return 1
+    return 0
+
+def _grant_user_grade_reward_if_needed(db: Session, user: Community_User, grade: int) -> int:
+    """
+    등급 달성 보상 포인트를 1회만 지급.
+    - 이미 지급된 경우: 0 반환
+    - 지급 시: 지급 금액 반환 + point_balance/원장(Point) 반영
+    """
+    g = int(grade or 0)
+    amount = int(GRADE_REWARD_BY_GRADE.get(g, 0) or 0)
+    if g <= 0 or amount <= 0:
+        return 0
+
+    reason = f"user_grade_reward_{g}"
+    already = (
+        db.query(Point.id)
+        .filter(Point.user_id == user.id, Point.reason == reason)
+        .first()
+        is not None
+    )
+    if already:
+        return 0
+
+    user.point_balance = int(getattr(user, "point_balance", 0) or 0) + amount
+    db.add(Point(user_id=user.id, reason=reason, amount=amount))
+    return amount
+
+def _apply_user_grade_upgrade(db: Session, user: Community_User, referral_count: int) -> bool:
+    """
+    추천인 수 기반 user_grade 자동 등업 + 달성 보너스 지급(원장/잔액 반영).
+    - 다운그레이드는 하지 않음.
+    Returns: 변경 여부(등급이 실제로 올라갔는지)
+    """
+    target = _grade_from_referral_count(referral_count)
+    current = int(getattr(user, "user_grade", 0) or 0)
+    if target <= current:
+        return False
+
+    # 등급을 한 번에 뛰어넘는 경우도 있어(예: 0 -> 2) 중간 등급 보너스도 누락 없이 지급
+    for g in range(current + 1, target + 1):
+        _grant_user_grade_reward_if_needed(db, user, g)
+
+    user.user_grade = target
+    db.add(user)
+    return True
+
 def _rollover_recruit_card_types(db: Session) -> None:
     """
     구인글(post_type=1) 카드 타입을 개수 제한에 맞춰 롤오버합니다.
@@ -1110,6 +1182,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
                     referrer_code=input_code,
                 )
             )
+            db.flush()  # 아래 추천인 수 집계에 방금 추가한 Referral이 포함되도록
 
             bonus = 1000
             referral_bonus_referred_amount = bonus
@@ -1118,6 +1191,15 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             # 추천인 포인트 적립
             referrer.point_balance = int(referrer.point_balance or 0) + bonus
             db.add(Point(user_id=referrer.id, reason="referral_bonus_referrer", amount=bonus))
+
+            # --- 추천인 수 기반 자동 등업(등업만) ---
+            ref_cnt = (
+                db.query(func.count(Referral.id))
+                .filter(Referral.referrer_user_id == referrer.id)
+                .scalar()
+                or 0
+            )
+            _apply_user_grade_upgrade(db, referrer, int(ref_cnt))
 
             # 피추천인 포인트 적립
             user.point_balance = int(user.point_balance or 0) + bonus
@@ -2014,6 +2096,11 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
         .scalar()
         or 0
     )
+
+    # --- 추천인 수 기반 자동 등업(등업만) ---
+    if _apply_user_grade_upgrade(db, user, int(referral_count)):
+        db.commit()
+        db.refresh(user)
 
     # signup_date를 문자열로 변환 (None이면 None 유지)
     signup_date_str = user.signup_date.isoformat() if user.signup_date else None
