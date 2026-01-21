@@ -1429,6 +1429,166 @@ def referral_ranking(db: Session = Depends(get_db)):
     return {"status": 0, "items": items}
 
 
+@app.get("/community/referrals/network/{username}")
+def referral_network(
+    username: str,
+    max_depth: int = Query(20),
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """
+    내 아래로 추천인 인맥(트리/다단계) 조회.
+    - nickname은 Community_User.username을 그대로 사용
+    - cursor는 offset 문자열("0", "100") 기반
+    - total_count는 root 제외, 하위 인맥 distinct 기준
+    - 100명 달성 시 1회 보상(100만 포인트) 지급
+    """
+    try:
+        root = db.query(Community_User).filter(Community_User.username == username).first()
+        if not root:
+            return {
+                "status": 1,
+                "root_username": username,
+                "total_count": 0,
+                "items": [],
+                "next_cursor": None,
+                "reward": {"threshold": 100, "amount": 1_000_000, "granted": False},
+            }
+
+        # 방어적 파싱/제한
+        try:
+            offset = int((cursor or "0").strip() or "0")
+        except Exception:
+            offset = 0
+        if offset < 0:
+            offset = 0
+
+        try:
+            md = int(max_depth or 20)
+        except Exception:
+            md = 20
+        if md < 1:
+            md = 1
+        # 과도한 재귀로 DB 부하가 커지는 것을 방지(Contract 변경 없이 내부 제한)
+        md = min(md, 200)
+
+        cte_base = """
+WITH RECURSIVE downline AS (
+    SELECT
+        r.referred_user_id AS descendant_id,
+        1 AS depth,
+        ARRAY[r.referrer_user_id, r.referred_user_id] AS path
+    FROM referral r
+    WHERE r.referrer_user_id = :root_id
+    UNION ALL
+    SELECT
+        r.referred_user_id AS descendant_id,
+        d.depth + 1 AS depth,
+        d.path || r.referred_user_id AS path
+    FROM referral r
+    JOIN downline d ON r.referrer_user_id = d.descendant_id
+    WHERE d.depth < :max_depth
+      AND NOT (r.referred_user_id = ANY(d.path))
+)
+"""
+
+        total_sql = cte_base + """
+SELECT COUNT(*) AS total_count
+FROM (SELECT DISTINCT descendant_id FROM downline) s
+"""
+
+        total_row = db.execute(
+            text(total_sql),
+            {"root_id": int(root.id), "max_depth": md},
+        ).first()
+        total_count = int(getattr(total_row, "total_count", 0) or 0)
+
+        items_sql = cte_base + """
+, dedup AS (
+    SELECT descendant_id, MIN(depth) AS depth
+    FROM downline
+    GROUP BY descendant_id
+)
+SELECT
+    u.username AS nickname,
+    d.depth AS depth,
+    u.signup_date AS joined_at
+FROM dedup d
+JOIN community_users u ON u.id::bigint = d.descendant_id
+ORDER BY d.depth ASC, u.signup_date ASC NULLS LAST, u.username ASC
+OFFSET :offset
+LIMIT :limit
+"""
+
+        rows = db.execute(
+            text(items_sql),
+            {
+                "root_id": int(root.id),
+                "max_depth": md,
+                "offset": int(offset),
+                "limit": int(limit),
+            },
+        ).fetchall()
+
+        items = [
+            {
+                "nickname": r.nickname,
+                "depth": int(r.depth or 0),
+                "joined_at": r.joined_at.isoformat() if getattr(r, "joined_at", None) else None,
+            }
+            for r in rows
+        ]
+
+        next_cursor = str(offset + int(limit)) if (offset + int(limit)) < total_count else None
+
+        # --- 100명 달성 보상(1회성, 동시요청 중복 지급 방지) ---
+        reward_granted = False
+        if total_count >= 100:
+            try:
+                # user row lock으로 동일 유저의 보상 지급을 직렬화
+                locked = (
+                    db.query(Community_User)
+                    .filter(Community_User.id == root.id)
+                    .with_for_update()
+                    .first()
+                )
+                if locked:
+                    already = (
+                        db.query(Point.id)
+                        .filter(Point.user_id == locked.id, Point.reason == "referral_network_100")
+                        .first()
+                        is not None
+                    )
+                    if already:
+                        reward_granted = True
+                    else:
+                        locked.point_balance = int(getattr(locked, "point_balance", 0) or 0) + 1_000_000
+                        db.add(Point(user_id=locked.id, reason="referral_network_100", amount=1_000_000))
+                        db.add(locked)
+                        db.commit()
+                        reward_granted = True
+            except Exception:
+                db.rollback()
+                # 보상 지급 중 오류가 나더라도 Contract에 맞춰 status=8로 반환
+                return {"status": 8}
+
+        return {
+            "status": 0,
+            "root_username": str(root.username),
+            "total_count": total_count,
+            "items": items,
+            "next_cursor": next_cursor,
+            "reward": {"threshold": 100, "amount": 1_000_000, "granted": bool(reward_granted)},
+        }
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"status": 8}
+
+
 @app.get("/community/points/{username}")
 def list_points(username: str, db: Session = Depends(get_db)):
     """
