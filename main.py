@@ -61,21 +61,25 @@ CARD1_MAX = 30
 CARD2_MAX = 70
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
-    1: 10000,
-    2: 30000,
-    3: 60000,
-    4: 100000,
+    # 등급 달성 보상 포인트(1회성)
+    # -1: 일반회원(보상 없음)
+    0: 50_000,      # 아마추어
+    1: 100_000,     # 세미프로
+    2: 200_000,     # 프로
+    3: 500_000,     # 마스터
+    4: 1_000_000,   # 레전드
 }
 
 def _grade_from_referral_count(referral_count: int) -> int:
     """
     추천인 수 기준 user_grade 자동 등업.
     user_grade:
-      0: 기본(아마추어)
-      1: 10명 이상
-      2: 30명 이상
-      3: 60명 이상
-      4: 100명 이상
+      -1: 일반회원(기본)
+       0: 아마추어(5명 이상)
+       1: 세미프로(10명 이상)
+       2: 프로(30명 이상)
+       3: 마스터(60명 이상)
+       4: 레전드(100명 이상)
     """
     c = int(referral_count or 0)
     if c >= 100:
@@ -86,7 +90,9 @@ def _grade_from_referral_count(referral_count: int) -> int:
         return 2
     if c >= 10:
         return 1
-    return 0
+    if c >= 5:
+        return 0
+    return -1
 
 def _grant_user_grade_reward_if_needed(db: Session, user: Community_User, grade: int) -> int:
     """
@@ -96,7 +102,8 @@ def _grant_user_grade_reward_if_needed(db: Session, user: Community_User, grade:
     """
     g = int(grade or 0)
     amount = int(GRADE_REWARD_BY_GRADE.get(g, 0) or 0)
-    if g <= 0 or amount <= 0:
+    # 0(아마추어)부터 보상 지급 대상. 음수 등급은 보상 없음.
+    if g < 0 or amount <= 0:
         return 0
 
     reason = f"user_grade_reward_{g}"
@@ -115,18 +122,20 @@ def _grant_user_grade_reward_if_needed(db: Session, user: Community_User, grade:
 
 def _apply_user_grade_upgrade(db: Session, user: Community_User, referral_count: int) -> bool:
     """
-    추천인 수 기반 user_grade 자동 등업 + 달성 보너스 지급(원장/잔액 반영).
-    - 다운그레이드는 하지 않음.
-    Returns: 변경 여부(등급이 실제로 올라갔는지)
+    추천인 수 기반 user_grade 동기화 + 달성 보너스 지급(원장/잔액 반영).
+    - 등급은 referral_count 기준으로 항상 동기화(다운그레이드 포함)
+    - 보상은 등급이 올라갈 때만(중간 등급 포함) 1회성으로 지급
+    Returns: 변경 여부(등급이 실제로 변경됐는지)
     """
     target = _grade_from_referral_count(referral_count)
-    current = int(getattr(user, "user_grade", 0) or 0)
-    if target <= current:
+    current = int(getattr(user, "user_grade", -1) or -1)
+    if target == current:
         return False
 
-    # 등급을 한 번에 뛰어넘는 경우도 있어(예: 0 -> 2) 중간 등급 보너스도 누락 없이 지급
-    for g in range(current + 1, target + 1):
-        _grant_user_grade_reward_if_needed(db, user, g)
+    # 등급이 올라가는 경우에만(예: -1 -> 0, 1 -> 3) 중간 등급 보너스도 누락 없이 지급
+    if target > current:
+        for g in range(current + 1, target + 1):
+            _grant_user_grade_reward_if_needed(db, user, g)
 
     user.user_grade = target
     db.add(user)
@@ -1117,6 +1126,8 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         phone_number  = digits,
         region        = req.region,  
         signup_date   = date.today(), 
+        # 정책(2026-01): 일반회원 기본 등급은 -1
+        user_grade    = -1,
         marketing_consent=bool(req.marketing_consent),
         custom_industry_codes=list(req.custom_industry_codes or []),
         custom_region_codes=list(req.custom_region_codes or []),
@@ -1192,7 +1203,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             referrer.point_balance = int(referrer.point_balance or 0) + bonus
             db.add(Point(user_id=referrer.id, reason="referral_bonus_referrer", amount=bonus))
 
-            # --- 추천인 수 기반 자동 등업(등업만) ---
+            # --- 추천인 수 기반 자동 등급 동기화(등급 상승 시 보상 지급) ---
             ref_cnt = (
                 db.query(func.count(Referral.id))
                 .filter(Referral.referrer_user_id == referrer.id)
@@ -2097,7 +2108,7 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
         or 0
     )
 
-    # --- 추천인 수 기반 자동 등업(등업만) ---
+    # --- 추천인 수 기반 자동 등급 동기화(등급 상승 시 보상 지급) ---
     if _apply_user_grade_upgrade(db, user, int(referral_count)):
         db.commit()
         db.refresh(user)
@@ -2108,8 +2119,8 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
     return {
         "status": 0,
         "signup_date": signup_date_str,
-        # user_grade: 0-아마추어 / 1-세미프로 / 2-프로 / 3-마스터 / 4-레전드
-        "user_grade": int(user.user_grade) if getattr(user, "user_grade", None) is not None else 0,
+        # user_grade: -1-일반회원 / 0-아마추어 / 1-세미프로 / 2-프로 / 3-마스터 / 4-레전드
+        "user_grade": int(user.user_grade) if getattr(user, "user_grade", None) is not None else -1,
         "is_owner": bool(getattr(user, "is_owner", False)),
         "posts": {
             "type1": counts[1],
@@ -3662,7 +3673,7 @@ def export_users(
                 u.region,
                 u.signup_date.isoformat() if getattr(u, "signup_date", None) else None,
                 bool(getattr(u, "is_owner", False)),
-                int(getattr(u, "user_grade", 0) or 0),
+                int(getattr(u, "user_grade", -1) or -1),
                 int(getattr(u, "point_balance", 0) or 0),
                 int(getattr(u, "cash_balance", 0) or 0),
                 bool(getattr(u, "marketing_consent", False)),
