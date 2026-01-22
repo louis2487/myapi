@@ -4140,6 +4140,7 @@ def community_admin_get_user(
                 "user_grade": int(getattr(user, "user_grade", 0) or 0),
                 "is_owner": bool(getattr(user, "is_owner", False)),
                 "admin_acknowledged": bool(getattr(user, "admin_acknowledged", False)),
+                "referral_code": getattr(user, "referral_code", None),
                 "referral_count": int(referral_count),
                 "posts": {"type1": counts[1], "type3": counts[3], "type4": counts[4]},
             },
