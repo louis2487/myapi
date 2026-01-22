@@ -4024,13 +4024,25 @@ def community_admin_list_users(
         if lim > 200:
             lim = 200
 
-        q = db.query(Community_User).order_by(Community_User.username.asc())
-        if cursor:
-            q = q.filter(Community_User.username > cursor)
+        # cursor: offset 문자열("0", "50") 기반
+        try:
+            offset = int((cursor or "0").strip() or "0")
+        except Exception:
+            offset = 0
+        if offset < 0:
+            offset = 0
 
-        rows = q.limit(lim + 1).all()
+        q = (
+            db.query(Community_User)
+            .order_by(
+                Community_User.signup_date.desc().nullslast(),
+                Community_User.username.asc(),
+            )
+        )
+
+        rows = q.offset(offset).limit(lim + 1).all()
         items = rows[:lim]
-        next_cursor = items[-1].username if len(rows) > lim else None
+        next_cursor = str(offset + lim) if len(rows) > lim else None
 
         return {
             "status": 0,
