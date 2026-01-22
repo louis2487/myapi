@@ -2198,6 +2198,7 @@ class UserUpdateRequest(BaseModel):
     password_confirm: str | None = Field(default=None, min_length=2, max_length=255)
     name: str | None = Field(default=None, max_length=50)       # 실명
     phone_number: str | None = Field(default=None, max_length=20)
+    phone_verification_id: str | None = Field(default=None, max_length=80)
     region: str | None = Field(default=None, max_length=100)
     # community_users 신규 필드(2026-01)
     marketing_consent: bool | None = None
@@ -2262,7 +2263,22 @@ def update_user(
         user.name = req.name
 
     if req.phone_number is not None:
-        user.phone_number = req.phone_number
+        # phone_number는 digits 형태로 저장(하이픈 제거)
+        new_digits = _normalize_phone(req.phone_number)
+        old_digits = _normalize_phone(user.phone_number or "")
+
+        # 실제 변경인 경우에만 휴대폰 인증을 강제
+        if new_digits != old_digits:
+            if not req.phone_verification_id:
+                return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
+            try:
+                verified_digits = _require_verified_phone(db, req.phone_number, req.phone_verification_id)
+            except Exception:
+                return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
+            user.phone_number = verified_digits
+        else:
+            # 변경이 아니면 기존 값을 유지하되, 혹시 하이픈 포함 값이 들어있다면 정규화
+            user.phone_number = old_digits if old_digits else user.phone_number
 
     if req.region is not None:
         user.region = req.region
