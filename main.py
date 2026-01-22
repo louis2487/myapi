@@ -4072,7 +4072,7 @@ def community_admin_get_user(
       GET /community/admin/users/{nickname}?actor_nickname=...
       response:
         status
-        user: { nickname,name,signup_date,point_balance,cash_balance,user_grade,is_owner,admin_acknowledged,referral_count,posts:{type1,type3,type4} }
+        user: { nickname,name,phone_number,signup_date,point_balance,cash_balance,user_grade,is_owner,admin_acknowledged,referral_count,posts:{type1,type3,type4} }
         restrictions: Array<{ post_type, restricted_until }>
       권한: 관리자 또는 오너
     """
@@ -4147,6 +4147,7 @@ def community_admin_get_user(
             "user": {
                 "nickname": user.username,
                 "name": user.name,
+                "phone_number": getattr(user, "phone_number", None),
                 "signup_date": user.signup_date.isoformat() if getattr(user, "signup_date", None) else None,
                 "point_balance": int(user.point_balance or 0),
                 "cash_balance": int(user.cash_balance or 0),
