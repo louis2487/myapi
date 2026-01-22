@@ -4010,7 +4010,7 @@ def community_admin_list_users(
     """
     Contract:
       GET /community/admin/users?cursor?&limit?
-      response: { status, items:[{nickname,name,signup_date}], next_cursor }
+      response: { status, items:[{nickname,name,signup_date,admin_acknowledged}], next_cursor }
       권한: 관리자 또는 오너만 (status=3)
     """
     actor = _try_get_current_community_user(db, authorization)
@@ -4051,6 +4051,7 @@ def community_admin_list_users(
                     "nickname": u.username,
                     "name": u.name,
                     "signup_date": u.signup_date.isoformat() if getattr(u, "signup_date", None) else None,
+                    "admin_acknowledged": bool(getattr(u, "admin_acknowledged", False)),
                 }
                 for u in items
             ],
@@ -4317,13 +4318,13 @@ def community_owner_set_admin_acknowledged(
     db: Session = Depends(get_db),
 ):
     """
-    오너 권한에서 관리자 권한 부여.
-    - admin_acknowledged = true 로 설정
-    body: { actor_nickname }
+    오너 권한에서 관리자 권한 수정(부여/회수).
+    body: { actor_nickname, admin_acknowledged?: true|false }  (미지정 시 true)
     response: { status, admin_acknowledged }
     status: 0|1|3|8
     """
     actor_nickname = body.get("actor_nickname")
+    enabled_raw = body.get("admin_acknowledged", None)
 
     token_user = _try_get_current_community_user(db, authorization)
     actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
@@ -4332,6 +4333,27 @@ def community_owner_set_admin_acknowledged(
 
     if not _is_owner(actor):
         return {"status": 3, "admin_acknowledged": False}
+
+    enabled = True
+    if enabled_raw is None:
+        enabled = True
+    elif isinstance(enabled_raw, bool):
+        enabled = enabled_raw
+    elif isinstance(enabled_raw, (int, float)):
+        try:
+            enabled = bool(int(enabled_raw))
+        except Exception:
+            return {"status": 1, "admin_acknowledged": False}
+    elif isinstance(enabled_raw, str):
+        s = enabled_raw.strip().lower()
+        if s in ("1", "true", "t", "yes", "y", "on"):
+            enabled = True
+        elif s in ("0", "false", "f", "no", "n", "off"):
+            enabled = False
+        else:
+            return {"status": 1, "admin_acknowledged": False}
+    else:
+        return {"status": 1, "admin_acknowledged": False}
 
     try:
         user = (
@@ -4343,7 +4365,7 @@ def community_owner_set_admin_acknowledged(
         if not user:
             return {"status": 1, "admin_acknowledged": False}
 
-        user.admin_acknowledged = True
+        user.admin_acknowledged = bool(enabled)
         db.add(user)
         db.commit()
         db.refresh(user)
