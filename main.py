@@ -4081,6 +4081,14 @@ def community_admin_get_user(
         if not user:
             return {"status": 1}
 
+        def _post_item(p: Community_Post) -> dict:
+            return {
+                "id": int(p.id),
+                "title": str(getattr(p, "title", "") or ""),
+                "created_at": _dt_to_iso(getattr(p, "created_at", None)),
+                "status": str(getattr(p, "status", None) or "") if getattr(p, "status", None) is not None else None,
+            }
+
         rows = (
             db.query(Community_Post.post_type, func.count(Community_Post.id).label("cnt"))
             .filter(
@@ -4106,6 +4114,21 @@ def community_admin_get_user(
 
         restrictions_map = _load_restrictions_for_user(db, int(user.id))
 
+        # (추가) 작성 글 목록(읽기 전용): 타입별 최근 N개
+        # NOTE: Contract 기존 필드는 유지하고, 필드 추가만 합니다(프런트가 필요 시 사용).
+        def _list_posts_by_type(pt: int, lim: int = 20) -> list[dict]:
+            try:
+                posts = (
+                    db.query(Community_Post)
+                    .filter(Community_Post.user_id == user.id, Community_Post.post_type == pt)
+                    .order_by(Community_Post.created_at.desc(), Community_Post.id.desc())
+                    .limit(lim)
+                    .all()
+                )
+                return [_post_item(p) for p in posts]
+            except Exception:
+                return []
+
         return {
             "status": 0,
             "user": {
@@ -4125,6 +4148,11 @@ def community_admin_get_user(
                 {"post_type": 3, "restricted_until": _dt_to_iso(restrictions_map[3])},
                 {"post_type": 4, "restricted_until": _dt_to_iso(restrictions_map[4])},
             ],
+            "post_items": {
+                "type1": _list_posts_by_type(1, 20),
+                "type3": _list_posts_by_type(3, 20),
+                "type4": _list_posts_by_type(4, 20),
+            },
         }
     except Exception:
         return {"status": 8}
