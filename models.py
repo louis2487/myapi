@@ -118,6 +118,27 @@ class Community_User(Base):
         Index("ix_community_users_user_grade", "user_grade"),
     )
 
+class Community_User_Restriction(Base):
+    """
+    커뮤니티 유저 글 작성 제재(타입별 제한).
+    - 유니크: (user_id, post_type) 1행 유지(업서트로 갱신/해제)
+    - FK는 강제하지 않음(프로젝트 정책: 제약조건 최소화)
+    """
+    __tablename__ = "community_user_restrictions"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    post_type = Column(SmallInteger, nullable=False, index=True)  # 1|3|4
+    restricted_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_by_user_id = Column(Integer, nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_type", name="uq_community_user_restrictions_user_post_type"),
+        Index("ix_community_user_restrictions_user_post_type", "user_id", "post_type"),
+    )
+
 class Community_Phone_Verification(Base):
     """
     커뮤니티 회원가입 휴대폰 인증번호 발송/검증 이력.

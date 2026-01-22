@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from database import SessionLocal, engine
 import models
-from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_Phone_Verification, Phone, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
+from models import Base, RuntimeRecord, User, Recode, RangeSummaryOut, PurchaseVerifyIn, SubscriptionStatusOut, Community_User, Community_User_Restriction, Community_Phone_Verification, Phone, Community_Post, Community_Comment, Post_Like, Notification, Referral, Point, Cash, Payment
 import hashlib
 import jwt 
 from sqlalchemy import func ,select, or_, and_, text
@@ -447,6 +447,49 @@ def _ensure_phone_table() -> None:
     except Exception as e:
         print(f"[WARN] ensure phone table failed: {e}")
 
+def _ensure_community_user_restrictions_table() -> None:
+    """
+    Alembic 없이 community_user_restrictions 테이블을 생성/동기화합니다.
+    요구 스키마(Contract/지시서):
+      - user_id, post_type(1|3|4), restricted_until(timestamptz|null), reason, created_at, created_by_user_id
+      - UNIQUE (user_id, post_type) (업서트 갱신/해제용)
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.community_user_restrictions (
+                      id bigserial PRIMARY KEY,
+                      user_id integer NOT NULL,
+                      post_type smallint NOT NULL,
+                      restricted_until timestamptz NULL,
+                      reason text NULL,
+                      created_at timestamptz NOT NULL DEFAULT now(),
+                      created_by_user_id integer NULL,
+                      CONSTRAINT uq_community_user_restrictions_user_post_type UNIQUE (user_id, post_type)
+                    );
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_community_user_restrictions_user_id ON public.community_user_restrictions (user_id);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_community_user_restrictions_post_type ON public.community_user_restrictions (post_type);"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_community_user_restrictions_user_post_type ON public.community_user_restrictions (user_id, post_type);"
+                )
+            )
+    except Exception as e:
+        print(f"[WARN] ensure community_user_restrictions table failed: {e}")
+
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
@@ -454,6 +497,7 @@ _drop_all_constraints_on_table("cash")
 _ensure_community_users_columns_and_indexes()
 _ensure_community_posts_columns()
 _ensure_phone_table()
+_ensure_community_user_restrictions_table()
 
 def get_db():
     db = SessionLocal()
@@ -875,6 +919,29 @@ def get_current_community_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
+
+def _try_get_current_community_user(db: Session, authorization: str | None) -> Community_User | None:
+    """
+    Authorization 헤더가 있을 때만 JWT를 시도하고, 실패 시 None을 반환합니다.
+    - Admin/Owner API에서 Contract(status=3)로 처리하기 위한 헬퍼
+    """
+    try:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            return None
+        token = authorization.split(" ", 1)[1]
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        uid = int(payload.get("sub"))
+        return db.query(Community_User).filter(Community_User.id == uid).first()
+    except Exception:
+        return None
+
+def _is_admin_or_owner(u: Community_User | None) -> bool:
+    if not u:
+        return False
+    return bool(getattr(u, "admin_acknowledged", False) or getattr(u, "is_owner", False))
+
+def _is_owner(u: Community_User | None) -> bool:
+    return bool(u and getattr(u, "is_owner", False))
 
 class SignupRequest_C(BaseModel):
     username: str = Field(min_length=2, max_length=50)
@@ -2639,6 +2706,41 @@ class CommentListOut(BaseModel):
     next_cursor: Optional[str] = None
 #---------------------------------------------------------------
 
+def _enforce_user_post_restriction(db: Session, user_id: int, post_type: int) -> None:
+    """
+    글 작성 제재 enforcement(필수).
+    - now < restricted_until 이면 작성 거부
+    - 에러 메시지에 만료일(ISO)을 포함(프론트 안내용)
+    """
+    try:
+        pt = int(post_type)
+    except Exception:
+        return
+    if pt not in (1, 3, 4):
+        return
+
+    r = (
+        db.query(Community_User_Restriction)
+        .filter(
+            Community_User_Restriction.user_id == int(user_id),
+            Community_User_Restriction.post_type == pt,
+        )
+        .first()
+    )
+    if not r or not getattr(r, "restricted_until", None):
+        return
+
+    until = r.restricted_until
+    if getattr(until, "tzinfo", None) is None:
+        until = until.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    if now < until:
+        raise HTTPException(
+            status_code=403,
+            detail=f"작성 제한 중입니다. post_type={pt}, 제한 만료: {until.isoformat()}",
+        )
+
 @app.post("/community/posts/{username}", response_model=PostOut)
 def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
     # 유저 row lock으로 캐시 차감/포스트 생성 원자성 보장
@@ -2652,6 +2754,9 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invalid username")
 
     userId = user.id
+
+    # ---- 제재 enforcement: 구인글(post_type=1) 작성 제한/차단 ----
+    _enforce_user_post_restriction(db, int(userId), 1)
 
     # ---- 구인글(=post_type 1) 작성 제한: 하루 1회 (자정 기준, KST) ----
     now_utc = datetime.now(timezone.utc)
@@ -2820,6 +2925,9 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         raise HTTPException(status_code=404, detail="Invalid username")
 
     userId = user.id
+
+    # ---- 제재 enforcement: post_type(1/3/4) 작성 제한/차단 ----
+    _enforce_user_post_restriction(db, int(userId), int(post_type))
 
     # post_type == 1 (구인글): 하루 1회 제한 + 포인트 지급
     if int(post_type) == 1:
@@ -3858,6 +3966,307 @@ def export_users(
         media_type=media_type,
         background=BackgroundTask(lambda p=tmp_path: os.path.exists(p) and os.remove(p)),
     )
+
+
+# ==================== Community Admin/Owner: 회원 관리(목록/열람/제재/지급) ====================
+
+def _dt_to_iso(dt: datetime | None) -> str | None:
+    if not dt:
+        return None
+    try:
+        if getattr(dt, "tzinfo", None) is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except Exception:
+        try:
+            return dt.isoformat()
+        except Exception:
+            return None
+
+def _load_restrictions_for_user(db: Session, user_id: int) -> dict[int, datetime | None]:
+    rows = (
+        db.query(Community_User_Restriction)
+        .filter(
+            Community_User_Restriction.user_id == user_id,
+            Community_User_Restriction.post_type.in_([1, 3, 4]),
+        )
+        .all()
+    )
+    out: dict[int, datetime | None] = {1: None, 3: None, 4: None}
+    for r in rows:
+        try:
+            out[int(r.post_type)] = r.restricted_until
+        except Exception:
+            continue
+    return out
+
+@app.get("/community/admin/users")
+def community_admin_list_users(
+    cursor: str | None = Query(None),
+    limit: int | None = Query(50),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Contract:
+      GET /community/admin/users?cursor?&limit?
+      response: { status, items:[{nickname,name,signup_date}], next_cursor }
+      권한: 관리자 또는 오너만 (status=3)
+    """
+    actor = _try_get_current_community_user(db, authorization)
+    if not _is_admin_or_owner(actor):
+        return {"status": 3, "items": [], "next_cursor": None}
+
+    try:
+        lim = int(limit or 50)
+        if lim <= 0:
+            lim = 50
+        if lim > 200:
+            lim = 200
+
+        q = db.query(Community_User).order_by(Community_User.username.asc())
+        if cursor:
+            q = q.filter(Community_User.username > cursor)
+
+        rows = q.limit(lim + 1).all()
+        items = rows[:lim]
+        next_cursor = items[-1].username if len(rows) > lim else None
+
+        return {
+            "status": 0,
+            "items": [
+                {
+                    "nickname": u.username,
+                    "name": u.name,
+                    "signup_date": u.signup_date.isoformat() if getattr(u, "signup_date", None) else None,
+                }
+                for u in items
+            ],
+            "next_cursor": next_cursor,
+        }
+    except Exception:
+        return {"status": 8, "items": [], "next_cursor": None}
+
+@app.get("/community/admin/users/{nickname}")
+def community_admin_get_user(
+    nickname: str,
+    actor_nickname: str | None = Query(None),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Contract:
+      GET /community/admin/users/{nickname}?actor_nickname=...
+      response:
+        status
+        user: { nickname,name,signup_date,point_balance,cash_balance,user_grade,is_owner,admin_acknowledged,referral_count,posts:{type1,type3,type4} }
+        restrictions: Array<{ post_type, restricted_until }>
+      권한: 관리자 또는 오너
+    """
+    actor = None
+    token_user = _try_get_current_community_user(db, authorization)
+    if actor_nickname:
+        actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first()
+        # 토큰이 있고 actor_nickname이 불일치하면 거부(스푸핑 방어)
+        if token_user and actor and token_user.username != actor.username:
+            return {"status": 3}
+    else:
+        actor = token_user
+
+    if not _is_admin_or_owner(actor):
+        return {"status": 3}
+
+    try:
+        user = db.query(Community_User).filter(Community_User.username == nickname).first()
+        if not user:
+            return {"status": 1}
+
+        rows = (
+            db.query(Community_Post.post_type, func.count(Community_Post.id).label("cnt"))
+            .filter(
+                Community_Post.user_id == user.id,
+                Community_Post.post_type.in_([1, 3, 4]),
+            )
+            .group_by(Community_Post.post_type)
+            .all()
+        )
+        counts = {1: 0, 3: 0, 4: 0}
+        for pt, cnt in rows:
+            try:
+                counts[int(pt)] = int(cnt)
+            except Exception:
+                continue
+
+        referral_count = (
+            db.query(func.count(Referral.id))
+            .filter(Referral.referrer_user_id == user.id)
+            .scalar()
+            or 0
+        )
+
+        restrictions_map = _load_restrictions_for_user(db, int(user.id))
+
+        return {
+            "status": 0,
+            "user": {
+                "nickname": user.username,
+                "name": user.name,
+                "signup_date": user.signup_date.isoformat() if getattr(user, "signup_date", None) else None,
+                "point_balance": int(user.point_balance or 0),
+                "cash_balance": int(user.cash_balance or 0),
+                "user_grade": int(getattr(user, "user_grade", 0) or 0),
+                "is_owner": bool(getattr(user, "is_owner", False)),
+                "admin_acknowledged": bool(getattr(user, "admin_acknowledged", False)),
+                "referral_count": int(referral_count),
+                "posts": {"type1": counts[1], "type3": counts[3], "type4": counts[4]},
+            },
+            "restrictions": [
+                {"post_type": 1, "restricted_until": _dt_to_iso(restrictions_map[1])},
+                {"post_type": 3, "restricted_until": _dt_to_iso(restrictions_map[3])},
+                {"post_type": 4, "restricted_until": _dt_to_iso(restrictions_map[4])},
+            ],
+        }
+    except Exception:
+        return {"status": 8}
+
+@app.post("/community/admin/users/{nickname}/restrictions")
+def community_admin_update_user_restrictions(
+    nickname: str,
+    body: dict = Body(default_factory=dict),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Contract:
+      POST /community/admin/users/{nickname}/restrictions
+      body: { actor_nickname, changes:[{post_type,days}], reason? }
+      response: { status, restrictions:[{post_type,restricted_until}] }
+      권한: 관리자 또는 오너
+    """
+    actor_nickname = body.get("actor_nickname")
+    changes = body.get("changes")
+    reason = body.get("reason")
+
+    token_user = _try_get_current_community_user(db, authorization)
+    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
+    if token_user and actor and token_user.username != actor.username:
+        return {"status": 3, "restrictions": []}
+
+    if not _is_admin_or_owner(actor):
+        return {"status": 3, "restrictions": []}
+
+    if not isinstance(changes, list) or len(changes) == 0:
+        return {"status": 1, "restrictions": []}
+
+    try:
+        user = db.query(Community_User).filter(Community_User.username == nickname).first()
+        if not user:
+            return {"status": 1, "restrictions": []}
+
+        now = datetime.now(timezone.utc)
+        for ch in changes:
+            try:
+                post_type = int(ch.get("post_type"))
+                days = int(ch.get("days"))
+            except Exception:
+                continue
+            if post_type not in (1, 3, 4):
+                continue
+            if days < 0:
+                continue
+
+            restricted_until = None if days == 0 else (now + timedelta(days=days))
+
+            stmt = (
+                insert(Community_User_Restriction)
+                .values(
+                    user_id=int(user.id),
+                    post_type=post_type,
+                    restricted_until=restricted_until,
+                    reason=(str(reason) if reason is not None else None),
+                    created_by_user_id=(int(actor.id) if actor else None),
+                )
+                .on_conflict_do_update(
+                    index_elements=["user_id", "post_type"],
+                    set_={
+                        "restricted_until": restricted_until,
+                        "reason": (str(reason) if reason is not None else None),
+                        "created_by_user_id": (int(actor.id) if actor else None),
+                        "created_at": func.now(),
+                    },
+                )
+            )
+            db.execute(stmt)
+
+        db.commit()
+
+        restrictions_map = _load_restrictions_for_user(db, int(user.id))
+        return {
+            "status": 0,
+            "restrictions": [
+                {"post_type": 1, "restricted_until": _dt_to_iso(restrictions_map[1])},
+                {"post_type": 3, "restricted_until": _dt_to_iso(restrictions_map[3])},
+                {"post_type": 4, "restricted_until": _dt_to_iso(restrictions_map[4])},
+            ],
+        }
+    except Exception:
+        db.rollback()
+        return {"status": 8, "restrictions": []}
+
+@app.post("/community/owner/users/{nickname}/points")
+def community_owner_grant_points(
+    nickname: str,
+    body: dict = Body(default_factory=dict),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Contract:
+      POST /community/owner/users/{nickname}/points
+      body: { actor_nickname, amount(양수), reason(필수) }
+      response: { status, point_balance }
+      권한: 오너만
+    """
+    actor_nickname = body.get("actor_nickname")
+    amount = body.get("amount")
+    reason = body.get("reason")
+
+    token_user = _try_get_current_community_user(db, authorization)
+    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
+    if token_user and actor and token_user.username != actor.username:
+        return {"status": 3, "point_balance": 0}
+
+    if not _is_owner(actor):
+        return {"status": 3, "point_balance": 0}
+
+    try:
+        amt = int(amount)
+    except Exception:
+        return {"status": 1, "point_balance": 0}
+    if amt <= 0:
+        return {"status": 1, "point_balance": 0}
+    if not isinstance(reason, str) or not reason.strip():
+        return {"status": 1, "point_balance": 0}
+
+    try:
+        user = (
+            db.query(Community_User)
+            .filter(Community_User.username == nickname)
+            .with_for_update()
+            .first()
+        )
+        if not user:
+            return {"status": 1, "point_balance": 0}
+
+        user.point_balance = int(user.point_balance or 0) + amt
+        db.add(Point(user_id=int(user.id), reason=reason.strip(), amount=amt))
+        db.commit()
+        db.refresh(user)
+
+        return {"status": 0, "point_balance": int(user.point_balance or 0)}
+    except Exception:
+        db.rollback()
+        return {"status": 8, "point_balance": 0}
 
 
 class CommentUpdate(BaseModel):
