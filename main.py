@@ -4309,6 +4309,49 @@ def community_owner_grant_points(
         db.rollback()
         return {"status": 8, "point_balance": 0}
 
+@app.post("/community/owner/users/{nickname}/admin-acknowledged")
+def community_owner_set_admin_acknowledged(
+    nickname: str,
+    body: dict = Body(default_factory=dict),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    오너 권한에서 관리자 권한 부여.
+    - admin_acknowledged = true 로 설정
+    body: { actor_nickname }
+    response: { status, admin_acknowledged }
+    status: 0|1|3|8
+    """
+    actor_nickname = body.get("actor_nickname")
+
+    token_user = _try_get_current_community_user(db, authorization)
+    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
+    if token_user and actor and token_user.username != actor.username:
+        return {"status": 3, "admin_acknowledged": False}
+
+    if not _is_owner(actor):
+        return {"status": 3, "admin_acknowledged": False}
+
+    try:
+        user = (
+            db.query(Community_User)
+            .filter(Community_User.username == nickname)
+            .with_for_update()
+            .first()
+        )
+        if not user:
+            return {"status": 1, "admin_acknowledged": False}
+
+        user.admin_acknowledged = True
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return {"status": 0, "admin_acknowledged": bool(getattr(user, "admin_acknowledged", False))}
+    except Exception:
+        db.rollback()
+        return {"status": 8, "admin_acknowledged": False}
+
 
 class CommentUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
