@@ -77,16 +77,16 @@ def _grade_from_referral_count(referral_count: int) -> int:
       -1: 일반회원(기본)
        0: 아마추어(5명 이상)
        1: 세미프로(10명 이상)
-       2: 프로(30명 이상)
-       3: 마스터(60명 이상)
+       2: 프로(20명 이상)
+       3: 마스터(50명 이상)
        4: 레전드(100명 이상)
     """
     c = int(referral_count or 0)
     if c >= 100:
         return 4
-    if c >= 60:
+    if c >= 50:
         return 3
-    if c >= 30:
+    if c >= 20:
         return 2
     if c >= 10:
         return 1
