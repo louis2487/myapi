@@ -4336,6 +4336,61 @@ def community_admin_update_user_restrictions(
         db.rollback()
         return {"status": 8, "restrictions": []}
 
+
+@app.post("/community/admin/users/{nickname}/notify")
+def community_admin_notify_user(
+    nickname: str,
+    body: dict = Body(default_factory=dict),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    Contract:
+      POST /community/admin/users/{nickname}/notify
+      body: { actor_nickname, title, body }
+      response: { status, notification_id? }
+      권한: 관리자 또는 오너
+    """
+    actor_nickname = body.get("actor_nickname")
+    title = body.get("title")
+    msg = body.get("body")
+
+    token_user = _try_get_current_community_user(db, authorization)
+    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
+    if token_user and actor and token_user.username != actor.username:
+        return {"status": 3}
+
+    if not _is_admin_or_owner(actor):
+        return {"status": 3}
+
+    if not isinstance(title, str) or not title.strip():
+        return {"status": 1}
+    if not isinstance(msg, str) or not msg.strip():
+        return {"status": 1}
+
+    try:
+        user = db.query(Community_User).filter(Community_User.username == nickname).first()
+        if not user:
+            return {"status": 1}
+
+        data = {"source": "admin", "actor_nickname": getattr(actor, "username", None)}
+        noti = create_notification(
+            db,
+            user_id=int(user.id),
+            title=title.strip(),
+            body=msg.strip(),
+            type="system",
+            data=data,
+        )
+
+        if getattr(user, "push_token", None):
+            send_push(getattr(user, "push_token"), title.strip(), msg.strip(), data)
+
+        return {"status": 0, "notification_id": int(getattr(noti, "id", 0) or 0)}
+    except Exception:
+        db.rollback()
+        return {"status": 8}
+
 @app.post("/community/owner/users/{nickname}/points")
 def community_owner_grant_points(
     nickname: str,
