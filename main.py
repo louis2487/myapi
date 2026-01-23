@@ -1872,7 +1872,7 @@ def community_today_stats(db: Session = Depends(get_db)):
     """
     고객센터 '오늘의 현황' 용 집계.
     - 신규현장: KST 기준 오늘 생성된 구인글(post_type=1) 수
-    - 실시간 방문자: 최근 5분 내 popup_last_seen_at 갱신한 유저 수(근사치)
+    - 방문자 수: KST 기준 '오늘' popup_last_seen_at 갱신한 유저 수(근사치)
     - 신규 회원 수: KST 기준 오늘 가입(signup_date)한 유저 수
     """
     try:
@@ -1898,12 +1898,12 @@ def community_today_stats(db: Session = Depends(get_db)):
             or 0
         )
 
-        now_utc = datetime.now(timezone.utc)
-        realtime_visitors = (
+        visitors = (
             db.query(func.count(Community_User.id))
             .filter(
                 Community_User.popup_last_seen_at.isnot(None),
-                Community_User.popup_last_seen_at >= (now_utc - timedelta(minutes=5)),
+                Community_User.popup_last_seen_at >= start_utc,
+                Community_User.popup_last_seen_at < end_utc,
             )
             .scalar()
             or 0
@@ -1913,7 +1913,7 @@ def community_today_stats(db: Session = Depends(get_db)):
             "status": 0,
             "date": today_kst.isoformat(),
             "new_sites": int(new_sites),
-            "realtime_visitors": int(realtime_visitors),
+            "realtime_visitors": int(visitors),
             "new_users": int(new_users),
         }
     except Exception:
