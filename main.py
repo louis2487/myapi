@@ -1867,6 +1867,59 @@ def mark_popup_seen(
     }
 
 
+@app.get("/community/stats/today")
+def community_today_stats(db: Session = Depends(get_db)):
+    """
+    고객센터 '오늘의 현황' 용 집계.
+    - 신규현장: KST 기준 오늘 생성된 구인글(post_type=1) 수
+    - 실시간 방문자: 최근 5분 내 popup_last_seen_at 갱신한 유저 수(근사치)
+    - 신규 회원 수: KST 기준 오늘 가입(signup_date)한 유저 수
+    """
+    try:
+        now_kst = datetime.now(tz=KST)
+        today_kst = now_kst.date()
+        start_utc, end_utc = _kst_today_bounds_utc()
+
+        new_sites = (
+            db.query(func.count(Community_Post.id))
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.created_at >= start_utc,
+                Community_Post.created_at < end_utc,
+            )
+            .scalar()
+            or 0
+        )
+
+        new_users = (
+            db.query(func.count(Community_User.id))
+            .filter(Community_User.signup_date == today_kst)
+            .scalar()
+            or 0
+        )
+
+        now_utc = datetime.now(timezone.utc)
+        realtime_visitors = (
+            db.query(func.count(Community_User.id))
+            .filter(
+                Community_User.popup_last_seen_at.isnot(None),
+                Community_User.popup_last_seen_at >= (now_utc - timedelta(minutes=5)),
+            )
+            .scalar()
+            or 0
+        )
+
+        return {
+            "status": 0,
+            "date": today_kst.isoformat(),
+            "new_sites": int(new_sites),
+            "realtime_visitors": int(realtime_visitors),
+            "new_users": int(new_users),
+        }
+    except Exception:
+        return {"status": 8, "date": None, "new_sites": 0, "realtime_visitors": 0, "new_users": 0}
+
+
 @app.get("/community/cash/{username}")
 def list_cash(username: str, db: Session = Depends(get_db)):
     """
