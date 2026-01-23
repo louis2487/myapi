@@ -4072,12 +4072,13 @@ def _load_restrictions_for_user(db: Session, user_id: int) -> dict[int, datetime
 def community_admin_list_users(
     cursor: str | None = Query(None),
     limit: int | None = Query(50),
+    q: str | None = Query(None),
     authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
     Contract:
-      GET /community/admin/users?cursor?&limit?
+      GET /community/admin/users?cursor?&limit?&q?
       response: { status, items:[{nickname,name,signup_date,admin_acknowledged}], next_cursor }
       권한: 관리자 또는 오너만 (status=3)
     """
@@ -4100,7 +4101,7 @@ def community_admin_list_users(
         if offset < 0:
             offset = 0
 
-        q = (
+        qry = (
             db.query(Community_User)
             .order_by(
                 Community_User.signup_date.desc().nullslast(),
@@ -4108,7 +4109,18 @@ def community_admin_list_users(
             )
         )
 
-        rows = q.offset(offset).limit(lim + 1).all()
+        q_text = (q or "").strip()
+        if q_text:
+            # 닉네임(username) 또는 성함(name) 부분일치 검색
+            pat = f"%{q_text}%"
+            qry = qry.filter(
+                or_(
+                    Community_User.username.ilike(pat),
+                    Community_User.name.ilike(pat),
+                )
+            )
+
+        rows = qry.offset(offset).limit(lim + 1).all()
         items = rows[:lim]
         next_cursor = str(offset + lim) if len(rows) > lim else None
 
