@@ -59,6 +59,7 @@ SECRET_RSS_TOKEN = "rss-secret-token"
 # - 서버에서 card_type=2 글이 70개 초과 시: 가장 오래된 2유형을 3유형으로 변경
 CARD1_MAX = 30
 CARD2_MAX = 70
+AD_CARD1_MAX = 5
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
     # 등급 달성 보상 포인트(1회성)
@@ -198,6 +199,41 @@ def _rollover_recruit_card_types(db: Session) -> None:
             break
         oldest2.card_type = 3
         db.add(oldest2)
+
+def _rollover_ad_card_types(db: Session) -> None:
+    """
+    광고글(post_type=4) 카드 1유형(card_type=1)을 최대 개수로 제한합니다.
+    - card_type=1 -> 2 (5개 초과분을 오래된 순으로)
+    같은 트랜잭션 안에서 호출되어야 합니다.
+    """
+    while True:
+        c1 = (
+            db.query(func.count(Community_Post.id))
+            .filter(
+                Community_Post.post_type == 4,
+                Community_Post.card_type == 1,
+            )
+            .scalar()
+            or 0
+        )
+        if c1 <= AD_CARD1_MAX:
+            break
+
+        oldest1 = (
+            db.query(Community_Post)
+            .filter(
+                Community_Post.post_type == 4,
+                Community_Post.card_type == 1,
+            )
+            .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+            .enable_eagerloads(False)
+            .with_for_update()
+            .first()
+        )
+        if not oldest1:
+            break
+        oldest1.card_type = 2
+        db.add(oldest1)
 
 # -------------------- TossPayments (SSOT) --------------------
 # clientKey: 결제 페이지(HTML)에서만 사용
@@ -3032,9 +3068,12 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
    
     db.add(post)
     db.flush()
-    # 구인글(post_type=1)인 경우에만 카드 타입 롤오버 적용
+    # 카드 타입 롤오버 정책
     if int(post_type) == 1:
         _rollover_recruit_card_types(db)
+    elif int(post_type) == 4:
+        # 광고글(post_type=4): card_type=1 최대 5개 유지 (초과분은 오래된 순으로 2유형)
+        _rollover_ad_card_types(db)
     db.commit()
     db.refresh(post)
 
@@ -3722,6 +3761,19 @@ def update_post(
   
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(post, key, value)
+
+    db.flush()
+    # 광고글(post_type=4)에서 card_type=1이 5개를 초과하지 않도록 오래된 글을 2유형으로 롤오버
+    try:
+        pt = int(getattr(post, "post_type", 0) or 0)
+    except Exception:
+        pt = 0
+    try:
+        ct = int(getattr(post, "card_type", 0) or 0)
+    except Exception:
+        ct = 0
+    if pt == 4 and ct == 1:
+        _rollover_ad_card_types(db)
 
     db.commit()
     db.refresh(post)
