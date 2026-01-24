@@ -1209,6 +1209,31 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     ):
         return {"status": 9, "detail": "휴대폰 인증이 필요합니다."}
 
+    # community_users 테이블 기준 "동일 휴대폰 번호" 중복 가입 차단
+    # (과거 데이터에 하이픈이 포함되어 있을 수 있어 숫자만 비교)
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:
+        dialect = ""
+
+    if dialect == "postgresql":
+        phone_already_registered = (
+            db.query(Community_User.id)
+            .filter(func.regexp_replace(Community_User.phone_number, r"[^0-9]", "", "g") == digits)
+            .first()
+            is not None
+        )
+    else:
+        rows = (
+            db.query(Community_User)
+            .filter(Community_User.phone_number.isnot(None))
+            .all()
+        )
+        phone_already_registered = any(_normalize_phone(u.phone_number or "") == digits for u in rows)
+
+    if phone_already_registered:
+        return {"status": 10, "detail": "이미 등록된 휴대폰 번호가 있습니다."}
+
     if req.region is None:
         return {"status": 3}    
 
