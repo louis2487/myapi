@@ -52,6 +52,12 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 SECRET_RSS_TOKEN = "rss-secret-token"
 
+# -------------------- Kakao (recode: geocode + route distance) --------------------
+# 역지오코딩: Kakao Local REST API Key
+KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip()
+# 도로거리: Kakao Mobility(Navi) API Key (프로젝트에 따라 REST 키와 동일할 수 있음)
+KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKAO_REST_API_KEY
+
 # -------------------- Community Post card_type rollover --------------------
 # 요구사항:
 # - 구인글(post_type=1)은 write.tsx에서 항상 card_type=1로 등록됨
@@ -526,6 +532,124 @@ def _ensure_community_user_restrictions_table() -> None:
     except Exception as e:
         print(f"[WARN] ensure community_user_restrictions table failed: {e}")
 
+def _ensure_recode_columns() -> None:
+    """
+    recode 테이블을 운행일지 스펙(smartgauge.md)에 맞춰 확장합니다.
+    - 기존 테이블이 있어도 컬럼이 없으면 ADD COLUMN IF NOT EXISTS로 보강
+    - 기존 앱 하위호환을 위해 username/duration(초) 컬럼은 유지
+    """
+    try:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text("SELECT to_regclass('public.recode') IS NOT NULL")
+            ).scalar()
+            if not exists:
+                return
+
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.recode
+                      ADD COLUMN IF NOT EXISTS user_id integer NULL,
+                      ADD COLUMN IF NOT EXISTS duration_minutes integer NULL,
+                      ADD COLUMN IF NOT EXISTS start_location text NULL,
+                      ADD COLUMN IF NOT EXISTS end_location text NULL,
+                      ADD COLUMN IF NOT EXISTS trip_km numeric(10,2) NULL,
+                      ADD COLUMN IF NOT EXISTS trip_purpose text NULL,
+                      ADD COLUMN IF NOT EXISTS business_use boolean NOT NULL DEFAULT false;
+                    """
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recode_user_id ON public.recode (user_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recode_date ON public.recode (date);"))
+    except Exception as e:
+        print(f"[WARN] ensure recode columns failed: {e}")
+
+def _kakao_auth_header(api_key: str) -> dict:
+    """
+    Kakao REST/Mobility API 공통 인증 헤더.
+    """
+    k = (api_key or "").strip()
+    if not k:
+        return {}
+    return {"Authorization": f"KakaoAK {k}"}
+
+def _kakao_coord2_sigungu(lat: float, lng: float) -> str | None:
+    """
+    좌표(위도/경도)를 시/군/구 문자열로 변환합니다.
+    - 요구사항: 도/시군구 단위만 기록
+    - 저장 형태: \"{region_1depth_name} {region_2depth_name}\" (예: \"경기도 평택시\")
+    """
+    if not KAKAO_REST_API_KEY:
+        return None
+    try:
+        r = requests.get(
+            "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json",
+            params={"x": lng, "y": lat},
+            headers=_kakao_auth_header(KAKAO_REST_API_KEY),
+            timeout=8,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        docs = data.get("documents") or []
+        if not docs:
+            return None
+        # 우선순위: 행정동(H) -> 법정동(B) -> 첫번째
+        pick = None
+        for d in docs:
+            if d.get("region_type") == "H":
+                pick = d
+                break
+        if pick is None:
+            for d in docs:
+                if d.get("region_type") == "B":
+                    pick = d
+                    break
+        if pick is None:
+            pick = docs[0]
+        r1 = (pick.get("region_1depth_name") or "").strip()
+        r2 = (pick.get("region_2depth_name") or "").strip()
+        sigungu = " ".join([x for x in [r1, r2] if x])
+        return sigungu or None
+    except Exception as e:
+        print(f"[WARN] kakao coord2regioncode failed: {e}")
+        return None
+
+def _kakao_route_distance_km(start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> float | None:
+    """
+    출발/도착 좌표 사이 도로거리(km)를 카카오 모빌리티 길찾기 API로 계산합니다.
+    - 성공 시 km(float) 반환 (소수 2자리 반올림)
+    """
+    if not KAKAO_MOBILITY_API_KEY:
+        return None
+    try:
+        # Kakao Mobility(Navi) directions
+        r = requests.get(
+            "https://apis-navi.kakaomobility.com/v1/directions",
+            params={
+                "origin": f"{start_lng},{start_lat}",
+                "destination": f"{end_lng},{end_lat}",
+                "priority": "RECOMMEND",
+            },
+            headers=_kakao_auth_header(KAKAO_MOBILITY_API_KEY),
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        # routes[0].summary.distance (meters)
+        routes = data.get("routes") or []
+        if not routes:
+            return None
+        summary = (routes[0] or {}).get("summary") or {}
+        dist_m = summary.get("distance")
+        if dist_m is None:
+            return None
+        km = float(dist_m) / 1000.0
+        return round(km, 2)
+    except Exception as e:
+        print(f"[WARN] kakao directions distance failed: {e}")
+        return None
+
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
@@ -534,6 +658,7 @@ _ensure_community_users_columns_and_indexes()
 _ensure_community_posts_columns()
 _ensure_phone_table()
 _ensure_community_user_restrictions_table()
+_ensure_recode_columns()
 
 def get_db():
     db = SessionLocal()
@@ -570,13 +695,28 @@ class RecodeCreate(BaseModel):
     ontime: str
     offtime: str
     duration: int
+    # 스펙 확장(선택): GPS/사용자 입력
+    start_location: str | None = None
+    end_location: str | None = None
+    trip_km: float | None = None
+    trip_purpose: str | None = None
+    business_use: bool = False
+    # 선택: 서버에서 username -> user_id 매핑용 (신규 클라이언트)
+    user_id: int | None = None
 
 class RecodeOut(BaseModel):
-    username: str
+    username: str | None = None
+    user_id: int | None = None
     date: str
     ontime: str
     offtime: str
     duration: int
+    duration_minutes: int | None = None
+    start_location: str | None = None
+    end_location: str | None = None
+    trip_km: float | None = None
+    trip_purpose: str | None = None
+    business_use: bool = False
     class Config:
         orm_mode = True
 
@@ -672,22 +812,43 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 @app.get("/recode/{username}/{date}", response_model=RecodeListOut)
 def get_recode(username: str, date: str, db: Session = Depends(get_db)):
-    recodes = (
-        db.query(Recode)
-        .filter(Recode.username == username, Recode.date == date)
-        .all()
-    )
+    # 하위호환: 기존 데이터(username 기반) + 신규 데이터(user_id 기반) 모두 조회
+    user = db.query(User).filter(User.username == username).first()
+    conds = [Recode.username == username]
+    if user:
+        conds.append(Recode.user_id == user.id)
+    recodes = db.query(Recode).filter(Recode.date == date).filter(or_(*conds)).all()
     return {"recodes": recodes}
 
 
 @app.post("/recode/add")
 def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
+    # 신규 스펙: 가능하면 user_id를 채워서 저장(기존 클라이언트는 username만 보냄)
+    uid = recode.user_id
+    if uid is None and recode.username:
+        u = db.query(User).filter(User.username == recode.username).first()
+        uid = u.id if u else None
+
+    duration_minutes = None
+    try:
+        # 기존 클라이언트 duration은 초 단위로 들어오므로 분 컬럼도 함께 채움(바닥 나눗셈)
+        duration_minutes = int(recode.duration) // 60 if recode.duration is not None else None
+    except Exception:
+        duration_minutes = None
+
     new_r = Recode(  
         username=recode.username,
+        user_id=uid,
         date=recode.date,
         ontime=recode.ontime,
         offtime=recode.offtime,
-        duration=recode.duration
+        duration=recode.duration,
+        duration_minutes=duration_minutes,
+        start_location=recode.start_location,
+        end_location=recode.end_location,
+        trip_km=recode.trip_km,
+        trip_purpose=recode.trip_purpose,
+        business_use=bool(recode.business_use),
     )
     db.add(new_r)
     db.commit()
@@ -697,11 +858,15 @@ def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
 
 @app.get("/recode/summary/{username}/{start}/{end}", response_model=RangeSummaryOut)
 def recode_summary(username: str, start: str, end: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == username).first()
+    conds = [Recode.username == username]
+    if user:
+        conds.append(Recode.user_id == user.id)
     cnt, total = db.query(
         func.count(Recode.id),
         func.coalesce(func.sum(Recode.duration), 0)
     ).filter(
-        Recode.username == username,
+        or_(*conds),
         Recode.date >= start,
         Recode.date <= end
     ).one()
@@ -709,6 +874,187 @@ def recode_summary(username: str, start: str, end: str, db: Session = Depends(ge
         username=username, start=start, end=end,
         on_count=int(cnt), runtime_seconds=int(total or 0)
     )
+
+# -------------------- 운행일지(신규 스펙) API --------------------
+def _try_get_current_user(db: Session, authorization: str | None) -> User | None:
+    """
+    Authorization 헤더가 있을 때만 JWT를 시도하고, 실패 시 None을 반환합니다.
+    - /auth/login 토큰(sub=users.id) 전용
+    """
+    try:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            return None
+        token = authorization.split(" ", 1)[1]
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        uid = int(payload.get("sub"))
+        return db.query(User).filter(User.id == uid).first()
+    except Exception:
+        return None
+
+class RecodeStartIn(BaseModel):
+    """
+    시동 ON 시작 기록 생성.
+
+    인증/식별:
+    - (권장) Authorization: Bearer <JWT(sub=users.id)>
+    - (하위호환) username 필드
+
+    위치/거리:
+    - 서버는 좌표를 저장하지 않고, 시/군/구만 `start_location`에 저장합니다.
+    """
+    username: str | None = None
+    date: str | None = None  # YYYY-MM-DD (없으면 오늘)
+    ontime: str | None = None  # HH:MM[:SS] (없으면 현재)
+    start_lat: float
+    start_lng: float
+
+class RecodeStartOut(BaseModel):
+    id: int
+    date: str
+    ontime: str
+    start_location: str | None = None
+
+class RecodeEndIn(BaseModel):
+    """
+    시동 OFF 종료 기록 확정.
+    - 도착 시점 좌표로 `end_location`(시/군/구) 저장
+    - 출발/도착 좌표로 카카오 길찾기 기반 `trip_km`(도로거리) 계산
+    """
+    username: str | None = None
+    recode_id: int
+    offtime: str | None = None  # HH:MM[:SS]
+    duration_seconds: int | None = None
+    start_lat: float | None = None
+    start_lng: float | None = None
+    end_lat: float
+    end_lng: float
+
+class RecodePatchIn(BaseModel):
+    trip_purpose: str | None = None
+    business_use: bool | None = None
+
+@app.post("/recode/start", response_model=RecodeStartOut)
+def recode_start(
+    payload: RecodeStartIn,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    now = datetime.now()
+    date_str = payload.date or now.strftime("%Y-%m-%d")
+    on_str = payload.ontime or now.strftime("%H:%M:%S")
+
+    user = _try_get_current_user(db, authorization)
+    username = user.username if user else (payload.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=401, detail="username or Authorization required")
+
+    uid = user.id if user else None
+    if uid is None:
+        u = db.query(User).filter(User.username == username).first()
+        uid = u.id if u else None
+
+    start_loc = _kakao_coord2_sigungu(payload.start_lat, payload.start_lng)
+    r = Recode(
+        user_id=uid,
+        username=username,  # legacy 병행
+        date=date_str,
+        ontime=on_str,
+        offtime="",
+        duration=0,
+        duration_minutes=0,
+        start_location=start_loc,
+        end_location=None,
+        trip_km=None,
+        trip_purpose=None,
+        business_use=False,
+    )
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return RecodeStartOut(id=r.id, date=r.date, ontime=r.ontime, start_location=r.start_location)
+
+@app.post("/recode/end", response_model=RecodeOut)
+def recode_end(
+    payload: RecodeEndIn,
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+):
+    user = _try_get_current_user(db, authorization)
+    username = user.username if user else (payload.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=401, detail="username or Authorization required")
+
+    q = db.query(Recode).filter(Recode.id == payload.recode_id)
+    if user:
+        q = q.filter(or_(Recode.user_id == user.id, Recode.username == user.username))
+    else:
+        q = q.filter(Recode.username == username)
+    r = q.first()
+    if not r:
+        raise HTTPException(status_code=404, detail="recode not found")
+
+    now = datetime.now()
+    off_str = payload.offtime or now.strftime("%H:%M:%S")
+    r.offtime = off_str
+    r.end_location = _kakao_coord2_sigungu(payload.end_lat, payload.end_lng)
+
+    # 도로거리 계산: 출발/도착 좌표가 모두 있는 경우에만 수행
+    if payload.start_lat is not None and payload.start_lng is not None:
+        r.trip_km = _kakao_route_distance_km(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng)
+
+    # duration: 클라이언트가 주면 그대로 사용, 아니면 문자열로 계산(가능할 때만)
+    if payload.duration_seconds is not None:
+        try:
+            r.duration = max(int(payload.duration_seconds), 0)
+            r.duration_minutes = int(r.duration) // 60
+        except Exception:
+            pass
+    else:
+        # HH:MM[:SS] 파싱 지원
+        try:
+            def _parse_hms(s: str) -> int:
+                parts = (s or "").split(":")
+                if len(parts) == 2:
+                    h, m = int(parts[0]), int(parts[1])
+                    return h * 3600 + m * 60
+                if len(parts) == 3:
+                    h, m, sec = int(parts[0]), int(parts[1]), int(parts[2])
+                    return h * 3600 + m * 60 + sec
+                return 0
+
+            start_sec = _parse_hms(r.ontime)
+            end_sec = _parse_hms(off_str)
+            dur_sec = end_sec - start_sec
+            if dur_sec < 0:
+                dur_sec = 0
+            r.duration = int(dur_sec)
+            r.duration_minutes = int(dur_sec) // 60
+        except Exception:
+            pass
+
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
+
+@app.patch("/recode/{recode_id}", response_model=RecodeOut)
+def recode_patch(recode_id: int, payload: RecodePatchIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    r = db.query(Recode).filter(Recode.id == recode_id, Recode.user_id == user.id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="recode not found")
+    if payload.trip_purpose is not None:
+        r.trip_purpose = payload.trip_purpose
+    if payload.business_use is not None:
+        r.business_use = bool(payload.business_use)
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
+
+@app.get("/recode", response_model=RecodeListOut)
+def recode_list(date: str = Query(..., description="YYYY-MM-DD"), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    recodes = db.query(Recode).filter(Recode.user_id == user.id, Recode.date == date).all()
+    return {"recodes": recodes}
 
 @app.post("/play/rtdn")
 async def play_rtdn(request: Request, db: Session = Depends(get_db)):

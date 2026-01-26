@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text, SmallInteger
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text, SmallInteger, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
 from pydantic import BaseModel, ConfigDict
@@ -46,11 +46,27 @@ class Subscription(Base):
 class Recode(Base):
     __tablename__ = "recode"
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, index=True)
-    date = Column(String)
-    ontime = Column(String)  
-    offtime = Column(String)   
-    duration = Column(Integer)  
+    # legacy(하위호환): 기존 앱은 username 기반으로 동작
+    username = Column(String, index=True, nullable=True)
+
+    # 신규(스펙): user_id 기반 (users.id)
+    user_id = Column(Integer, index=True, nullable=True)
+
+    date = Column(String(20), index=True)  # YYYY-MM-DD
+    ontime = Column(String(10))  # HH:MM[:SS]
+    offtime = Column(String(10))  # HH:MM[:SS]
+
+    # legacy: 기존 앱은 초(second) 단위로 duration을 보냄
+    duration = Column(Integer)
+    # 신규 스펙: 분(minute) 단위 duration (옵션; 기존 데이터/클라이언트와 공존)
+    duration_minutes = Column(Integer, nullable=True)
+
+    # GPS/사용자 입력(스펙)
+    start_location = Column(Text, nullable=True)
+    end_location = Column(Text, nullable=True)
+    trip_km = Column(Numeric(10, 2), nullable=True)
+    trip_purpose = Column(Text, nullable=True)
+    business_use = Column(Boolean, nullable=False, server_default="false")
 
 
 class RangeSummaryOut(BaseModel):
