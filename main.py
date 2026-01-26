@@ -891,6 +891,19 @@ def _try_get_current_user(db: Session, authorization: str | None) -> User | None
     except Exception:
         return None
 
+def get_current_user(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> User:
+    """
+    /auth/login 으로 발급된 JWT(sub=users.id) 기반 인증.
+    - 기존 코드(Depends(get_current_user)) 하위호환용으로 유지
+    """
+    u = _try_get_current_user(db, authorization)
+    if not u:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return u
+
 class RecodeStartIn(BaseModel):
     """
     시동 ON 시작 기록 생성.
