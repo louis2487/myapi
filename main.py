@@ -1899,6 +1899,7 @@ def community_today_stats(db: Session = Depends(get_db)):
     - 신규현장: KST 기준 오늘 생성된 구인글(post_type=1) 수
     - 방문자 수: KST 기준 '오늘' popup_last_seen_at 갱신한 유저 수(근사치)
     - 신규 회원 수: KST 기준 오늘 가입(signup_date)한 유저 수
+    - 총 회원 수: community_users 전체 사용자 수
     """
     try:
         now_kst = datetime.now(tz=KST)
@@ -1934,15 +1935,22 @@ def community_today_stats(db: Session = Depends(get_db)):
             or 0
         )
 
+        total_users = (
+            db.query(func.count(Community_User.id))
+            .scalar()
+            or 0
+        )
+
         return {
             "status": 0,
             "date": today_kst.isoformat(),
             "new_sites": int(new_sites),
             "realtime_visitors": int(visitors),
             "new_users": int(new_users),
+            "total_users": int(total_users),
         }
     except Exception:
-        return {"status": 8, "date": None, "new_sites": 0, "realtime_visitors": 0, "new_users": 0}
+        return {"status": 8, "date": None, "new_sites": 0, "realtime_visitors": 0, "new_users": 0, "total_users": 0}
 
 
 @app.get("/community/cash/{username}")
@@ -2884,26 +2892,29 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invalid username")
 
     userId = user.id
+    is_admin_ack = bool(getattr(user, "admin_acknowledged", False))
 
-    # ---- 제재 enforcement: 구인글(post_type=1) 작성 제한/차단 ----
-    _enforce_user_post_restriction(db, int(userId), 1)
-
-    # ---- 구인글(=post_type 1) 작성 제한: 하루 1회 (자정 기준, KST) ----
     now_utc = datetime.now(timezone.utc)
-    kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
-    now_kst = now_utc.astimezone(kst)
+    # admin_acknowledged=True 이면 구인글 작성 제한(제재/일일작성)을 우회하여 무제한 작성 가능
+    if not is_admin_ack:
+        # ---- 제재 enforcement: 구인글(post_type=1) 작성 제한/차단 ----
+        _enforce_user_post_restriction(db, int(userId), 1)
 
-    last = user.last_recruit_posted_at
-    if last is not None:
-        # tzinfo가 없으면 UTC로 간주(레거시/드라이버 이슈 방어)
-        if getattr(last, "tzinfo", None) is None:
-            last = last.replace(tzinfo=timezone.utc)
-        last_kst = last.astimezone(kst)
-        if last_kst.date() == now_kst.date():
-            raise HTTPException(
-                status_code=400,
-                detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
-            )
+        # ---- 구인글(=post_type 1) 작성 제한: 하루 1회 (자정 기준, KST) ----
+        kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+        now_kst = now_utc.astimezone(kst)
+
+        last = user.last_recruit_posted_at
+        if last is not None:
+            # tzinfo가 없으면 UTC로 간주(레거시/드라이버 이슈 방어)
+            if getattr(last, "tzinfo", None) is None:
+                last = last.replace(tzinfo=timezone.utc)
+            last_kst = last.astimezone(kst)
+            if last_kst.date() == now_kst.date():
+                raise HTTPException(
+                    status_code=400,
+                    detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
+                )
 
     # ---- 구인글(post_type=1) 등록 정책 ----
     # 요청사항: 캐시 차감 없이, 무조건 1유형(card_type=1)으로 등록
@@ -2970,9 +2981,10 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
     )
    
     # ---- 구인글 작성 보상: 1000포인트 지급 + 마지막 작성 시각 갱신 ----
-    user.point_balance = int(user.point_balance or 0) + 1000
+    if not is_admin_ack:
+        user.point_balance = int(user.point_balance or 0) + 1000
+        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
     user.last_recruit_posted_at = now_utc
-    db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
 
     db.add(post)
     db.flush()  # created_at/id 확정 후 롤오버 처리
@@ -3055,34 +3067,39 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         raise HTTPException(status_code=404, detail="Invalid username")
 
     userId = user.id
+    is_admin_ack = bool(getattr(user, "admin_acknowledged", False))
 
     # ---- 제재 enforcement: post_type(1/3/4) 작성 제한/차단 ----
-    _enforce_user_post_restriction(db, int(userId), int(post_type))
+    # 구인글(post_type=1)은 admin_acknowledged=True 이면 제재 우회(무제한 작성)
+    if not (int(post_type) == 1 and is_admin_ack):
+        _enforce_user_post_restriction(db, int(userId), int(post_type))
 
     # post_type == 1 (구인글): 하루 1회 제한 + 포인트 지급
     if int(post_type) == 1:
         now_utc = datetime.now(timezone.utc)
-        kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
-        now_kst = now_utc.astimezone(kst)
+        if not is_admin_ack:
+            kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+            now_kst = now_utc.astimezone(kst)
 
-        last = user.last_recruit_posted_at
-        if last is not None:
-            if getattr(last, "tzinfo", None) is None:
-                last = last.replace(tzinfo=timezone.utc)
-            last_kst = last.astimezone(kst)
-            if last_kst.date() == now_kst.date():
-                raise HTTPException(
-                    status_code=400,
-                    detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
-                )
+            last = user.last_recruit_posted_at
+            if last is not None:
+                if getattr(last, "tzinfo", None) is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                last_kst = last.astimezone(kst)
+                if last_kst.date() == now_kst.date():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
+                    )
 
         # 구인글(post_type=1): 캐시 차감 없이 1유형으로 고정
         card_type = 1
 
         # 보상/작성시각 갱신
-        user.point_balance = int(user.point_balance or 0) + 1000
         user.last_recruit_posted_at = now_utc
-        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+        if not is_admin_ack:
+            user.point_balance = int(user.point_balance or 0) + 1000
+            db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
     else:
         card_type = body.card_type
 
@@ -4151,19 +4168,14 @@ def community_admin_list_users(
     cursor: str | None = Query(None),
     limit: int | None = Query(50),
     q: str | None = Query(None),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
     Contract:
       GET /community/admin/users?cursor?&limit?&q?
       response: { status, items:[{nickname,name,signup_date,admin_acknowledged}], next_cursor }
-      권한: 관리자 또는 오너만 (status=3)
+      권한 체크: 제거됨(클라이언트에서만 제어)
     """
-    actor = _try_get_current_community_user(db, authorization)
-    if not _is_admin_or_owner(actor):
-        return {"status": 3, "items": [], "next_cursor": None}
-
     try:
         lim = int(limit or 50)
         if lim <= 0:
@@ -4222,7 +4234,6 @@ def community_admin_list_users(
 def community_admin_get_user(
     nickname: str,
     actor_nickname: str | None = Query(None),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4232,21 +4243,8 @@ def community_admin_get_user(
         status
         user: { nickname,name,phone_number,signup_date,point_balance,cash_balance,user_grade,is_owner,admin_acknowledged,referral_count,posts:{type1,type3,type4} }
         restrictions: Array<{ post_type, restricted_until }>
-      권한: 관리자 또는 오너
+      권한 체크: 제거됨(클라이언트에서만 제어)
     """
-    actor = None
-    token_user = _try_get_current_community_user(db, authorization)
-    if actor_nickname:
-        actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first()
-        # 토큰이 있고 actor_nickname이 불일치하면 거부(스푸핑 방어)
-        if token_user and actor and token_user.username != actor.username:
-            return {"status": 3}
-    else:
-        actor = token_user
-
-    if not _is_admin_or_owner(actor):
-        return {"status": 3}
-
     try:
         user = db.query(Community_User).filter(Community_User.username == nickname).first()
         if not user:
@@ -4334,7 +4332,6 @@ def community_admin_get_user(
 def community_admin_update_user_restrictions(
     nickname: str,
     body: dict = Body(default_factory=dict),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4342,19 +4339,11 @@ def community_admin_update_user_restrictions(
       POST /community/admin/users/{nickname}/restrictions
       body: { actor_nickname, changes:[{post_type,days}], reason? }
       response: { status, restrictions:[{post_type,restricted_until}] }
-      권한: 관리자 또는 오너
+      권한 체크: 제거됨(클라이언트에서만 제어)
     """
     actor_nickname = body.get("actor_nickname")
     changes = body.get("changes")
     reason = body.get("reason")
-
-    token_user = _try_get_current_community_user(db, authorization)
-    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
-    if token_user and actor and token_user.username != actor.username:
-        return {"status": 3, "restrictions": []}
-
-    if not _is_admin_or_owner(actor):
-        return {"status": 3, "restrictions": []}
 
     if not isinstance(changes, list) or len(changes) == 0:
         return {"status": 1, "restrictions": []}
@@ -4385,7 +4374,7 @@ def community_admin_update_user_restrictions(
                     post_type=post_type,
                     restricted_until=restricted_until,
                     reason=(str(reason) if reason is not None else None),
-                    created_by_user_id=(int(actor.id) if actor else None),
+                    created_by_user_id=None,
                 )
                 .on_conflict_do_update(
                     index_elements=["user_id", "post_type"],
@@ -4419,7 +4408,6 @@ def community_admin_update_user_restrictions(
 def community_admin_notify_user(
     nickname: str,
     body: dict = Body(default_factory=dict),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4427,19 +4415,11 @@ def community_admin_notify_user(
       POST /community/admin/users/{nickname}/notify
       body: { actor_nickname, title, body }
       response: { status, notification_id? }
-      권한: 관리자 또는 오너
+      권한 체크: 제거됨(클라이언트에서만 제어)
     """
     actor_nickname = body.get("actor_nickname")
     title = body.get("title")
     msg = body.get("body")
-
-    token_user = _try_get_current_community_user(db, authorization)
-    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
-    if token_user and actor and token_user.username != actor.username:
-        return {"status": 3}
-
-    if not _is_admin_or_owner(actor):
-        return {"status": 3}
 
     if not isinstance(title, str) or not title.strip():
         return {"status": 1}
@@ -4451,7 +4431,7 @@ def community_admin_notify_user(
         if not user:
             return {"status": 1}
 
-        data = {"source": "admin", "actor_nickname": getattr(actor, "username", None)}
+        data = {"source": "admin", "actor_nickname": actor_nickname}
         noti = create_notification(
             db,
             user_id=int(user.id),
@@ -4473,7 +4453,6 @@ def community_admin_notify_user(
 def community_owner_grant_points(
     nickname: str,
     body: dict = Body(default_factory=dict),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4481,19 +4460,11 @@ def community_owner_grant_points(
       POST /community/owner/users/{nickname}/points
       body: { actor_nickname, amount(양수), reason(필수) }
       response: { status, point_balance }
-      권한: 오너만
+      권한 체크: 제거됨(클라이언트에서만 제어)
     """
     actor_nickname = body.get("actor_nickname")
     amount = body.get("amount")
     reason = body.get("reason")
-
-    token_user = _try_get_current_community_user(db, authorization)
-    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
-    if token_user and actor and token_user.username != actor.username:
-        return {"status": 3, "point_balance": 0}
-
-    if not _is_owner(actor):
-        return {"status": 3, "point_balance": 0}
 
     try:
         amt = int(amount)
@@ -4528,7 +4499,6 @@ def community_owner_grant_points(
 def community_owner_set_admin_acknowledged(
     nickname: str,
     body: dict = Body(default_factory=dict),
-    authorization: str | None = Header(default=None, alias="Authorization"),
     db: Session = Depends(get_db),
 ):
     """
@@ -4539,14 +4509,6 @@ def community_owner_set_admin_acknowledged(
     """
     actor_nickname = body.get("actor_nickname")
     enabled_raw = body.get("admin_acknowledged", None)
-
-    token_user = _try_get_current_community_user(db, authorization)
-    actor = db.query(Community_User).filter(Community_User.username == actor_nickname).first() if actor_nickname else token_user
-    if token_user and actor and token_user.username != actor.username:
-        return {"status": 3, "admin_acknowledged": False}
-
-    if not _is_owner(actor):
-        return {"status": 3, "admin_acknowledged": False}
 
     enabled = True
     if enabled_raw is None:
