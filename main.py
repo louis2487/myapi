@@ -1,4 +1,5 @@
 import os
+import calendar
 from datetime import datetime, timedelta, timezone, date
 try:
     from zoneinfo import ZoneInfo  # py3.9+
@@ -705,6 +706,7 @@ class RecodeCreate(BaseModel):
     user_id: int | None = None
 
 class RecodeOut(BaseModel):
+    id: int | None = None
     username: str | None = None
     user_id: int | None = None
     date: str
@@ -817,7 +819,29 @@ def get_recode(username: str, date: str, db: Session = Depends(get_db)):
     conds = [Recode.username == username]
     if user:
         conds.append(Recode.user_id == user.id)
-    recodes = db.query(Recode).filter(Recode.date == date).filter(or_(*conds)).all()
+    q = db.query(Recode).filter(or_(*conds))
+
+    # date 파라미터 지원:
+    # - YYYY-MM-DD: 해당 날짜(일간)
+    # - YYYY-MM: 해당 월 전체(월간)
+    if len(date) == 10 and date[4] == "-" and date[7] == "-":
+        q = q.filter(Recode.date == date)
+    elif len(date) == 7 and date[4] == "-":
+        try:
+            y = int(date[0:4])
+            m = int(date[5:7])
+            last_day = calendar.monthrange(y, m)[1]
+            start = f"{y:04d}-{m:02d}-01"
+            end = f"{y:04d}-{m:02d}-{last_day:02d}"
+            q = q.filter(Recode.date >= start, Recode.date <= end)
+        except Exception:
+            # 파싱 실패 시 하위호환(정확 일치)
+            q = q.filter(Recode.date == date)
+    else:
+        # 예상 외 포맷은 하위호환(정확 일치)
+        q = q.filter(Recode.date == date)
+
+    recodes = q.all()
     return {"recodes": recodes}
 
 
