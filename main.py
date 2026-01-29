@@ -162,7 +162,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
     while True:
         c1 = (
             db.query(func.count(Community_Post.id))
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 1,
+            )
             .scalar()
             or 0
         )
@@ -171,7 +175,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
 
         oldest1 = (
             db.query(Community_Post)
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 1,
+            )
             .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
             # Community_Post.author 가 lazy="joined"라 LEFT OUTER JOIN이 붙음.
             # PostgreSQL은 OUTER JOIN의 nullable side에 FOR UPDATE를 적용할 수 없어 500이 남.
@@ -190,7 +198,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
     while True:
         c1 = (
             db.query(func.count(Community_Post.id))
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 1,
+            )
             .scalar()
             or 0
         )
@@ -199,7 +211,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
 
         newest2 = (
             db.query(Community_Post)
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 2,
+            )
             .order_by(Community_Post.created_at.desc(), Community_Post.id.desc())
             .enable_eagerloads(False)
             .with_for_update()
@@ -214,7 +230,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
     while True:
         c2 = (
             db.query(func.count(Community_Post.id))
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 2,
+            )
             .scalar()
             or 0
         )
@@ -223,7 +243,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
 
         oldest2 = (
             db.query(Community_Post)
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 2,
+            )
             .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
             .enable_eagerloads(False)
             .with_for_update()
@@ -239,7 +263,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
     while True:
         c2 = (
             db.query(func.count(Community_Post.id))
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 2,
+            )
             .scalar()
             or 0
         )
@@ -248,7 +276,11 @@ def _rollover_recruit_card_types(db: Session) -> None:
 
         newest3 = (
             db.query(Community_Post)
-            .filter(Community_Post.post_type == 1, Community_Post.card_type == 3)
+            .filter(
+                Community_Post.post_type == 1,
+                Community_Post.status == "published",
+                Community_Post.card_type == 3,
+            )
             .order_by(Community_Post.created_at.desc(), Community_Post.id.desc())
             .enable_eagerloads(False)
             .with_for_update()
@@ -4475,7 +4507,8 @@ def update_post(
         setattr(post, key, value)
 
     db.flush()
-    # 광고글(post_type=4)에서 card_type=1이 5개를 초과하지 않도록 오래된 글을 2유형으로 롤오버
+    # post_type=1(구인글): 마감/개시(status 변경) 포함, 항상 30/40 유지 롤오버 적용
+    # post_type=4(광고글): card_type=1이 5개를 초과하지 않도록 오래된 글을 2유형으로 롤오버
     try:
         pt = int(getattr(post, "post_type", 0) or 0)
     except Exception:
@@ -4484,6 +4517,8 @@ def update_post(
         ct = int(getattr(post, "card_type", 0) or 0)
     except Exception:
         ct = 0
+    if pt == 1:
+        _rollover_recruit_card_types(db)
     if pt == 4 and ct == 1:
         _rollover_ad_card_types(db)
 
