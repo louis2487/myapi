@@ -154,6 +154,8 @@ def _rollover_recruit_card_types(db: Session) -> None:
     구인글(post_type=1) 카드 타입을 개수 제한에 맞춰 롤오버합니다.
     - card_type=1 -> 2 (30개 초과분을 오래된 순으로)
     - card_type=2 -> 3 (40개 초과분을 오래된 순으로)
+    - card_type=2 -> 1 (card_type=1이 30개 미만이면, 가장 최신 2유형을 1유형으로 승격)
+    - card_type=3 -> 2 (card_type=2가 40개 미만이면, 가장 최신 3유형을 2유형으로 승격)
     같은 트랜잭션 안에서 호출되어야 합니다.
     """
     # 1유형: 30개 유지
@@ -183,6 +185,31 @@ def _rollover_recruit_card_types(db: Session) -> None:
         oldest1.card_type = 2
         db.add(oldest1)
 
+    # 1유형: 30개 미만이면 2유형에서 승격하여 채움
+    # - 삭제/수정 등으로 1유형이 줄어든 경우에도 30개를 유지하기 위함
+    while True:
+        c1 = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 1)
+            .scalar()
+            or 0
+        )
+        if c1 >= CARD1_MAX:
+            break
+
+        newest2 = (
+            db.query(Community_Post)
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .order_by(Community_Post.created_at.desc(), Community_Post.id.desc())
+            .enable_eagerloads(False)
+            .with_for_update()
+            .first()
+        )
+        if not newest2:
+            break
+        newest2.card_type = 1
+        db.add(newest2)
+
     # 2유형: 40개 유지 (초과분을 3유형으로)
     while True:
         c2 = (
@@ -206,6 +233,31 @@ def _rollover_recruit_card_types(db: Session) -> None:
             break
         oldest2.card_type = 3
         db.add(oldest2)
+
+    # 2유형: 40개 미만이면 3유형에서 승격하여 채움
+    # - 삭제/수정/승격(card_type=2 -> 1) 등으로 2유형이 줄어든 경우에도 40개를 유지하기 위함
+    while True:
+        c2 = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 2)
+            .scalar()
+            or 0
+        )
+        if c2 >= CARD2_MAX:
+            break
+
+        newest3 = (
+            db.query(Community_Post)
+            .filter(Community_Post.post_type == 1, Community_Post.card_type == 3)
+            .order_by(Community_Post.created_at.desc(), Community_Post.id.desc())
+            .enable_eagerloads(False)
+            .with_for_update()
+            .first()
+        )
+        if not newest3:
+            break
+        newest3.card_type = 2
+        db.add(newest3)
 
 def _rollover_ad_card_types(db: Session) -> None:
     """
@@ -4512,7 +4564,16 @@ def delete_post(
     if not post:
         raise HTTPException(status_code=404, detail="게시글을 찾을 수 없습니다.")
  
+    # 삭제 후 post_type=1 카드 정책(30/40 유지)을 다시 맞추기 위해 값 보관
+    try:
+        pt = int(getattr(post, "post_type", 0) or 0)
+    except Exception:
+        pt = 0
+
     db.delete(post)
+    db.flush()
+    if pt == 1:
+        _rollover_recruit_card_types(db)
     db.commit()
     return {"ok": True, "message": "삭제되었습니다."}
 
