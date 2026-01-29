@@ -248,6 +248,9 @@ class Community_Post(Base):
     item4_type = Column(String(255))
     item4_sup = Column(String(255)) 
     agent = Column(String(255))
+    # 모집(기타) 항목: 표시용 이름/수수료(텍스트 허용)
+    other_role_name = Column(String(255))
+    other_role_fee = Column(String(255))
     post_type= Column(DOUBLE_PRECISION, nullable=True)   
     card_type= Column(DOUBLE_PRECISION, nullable=True)                 
 

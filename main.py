@@ -453,6 +453,8 @@ def _ensure_community_posts_columns() -> None:
                       ADD COLUMN IF NOT EXISTS item4_sup varchar(255) NULL,
 
                       ADD COLUMN IF NOT EXISTS agent varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS other_role_name varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS other_role_fee varchar(255) NULL,
                       ADD COLUMN IF NOT EXISTS post_type double precision NULL,
                       ADD COLUMN IF NOT EXISTS card_type double precision NULL,
 
@@ -1764,6 +1766,21 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
+    # 회원가입 푸쉬 알림(오너 대상) - 실패해도 회원가입 성공 처리
+    try:
+        notify_owners_event(
+            db,
+            title="회원가입 알림",
+            body=f"새 회원 가입: {user.username}",
+            data={"event": "signup", "username": user.username},
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] notify_owners_event(signup) failed:", e)
+
     return {
         "status": 0,
         "signup_bonus_amount": signup_bonus_amount,
@@ -2279,23 +2296,73 @@ def mark_popup_seen(
 def community_today_stats(db: Session = Depends(get_db)):
     """
     고객센터 '오늘의 현황' 용 집계.
-    - 신규현장: KST 기준 오늘 생성된 구인글(post_type=1) 수
-    - 방문자 수: KST 기준 '오늘' popup_last_seen_at 갱신한 유저 수(근사치)
-    - 신규 회원 수: KST 기준 오늘 가입(signup_date)한 유저 수
-    - 총 회원 수: community_users 전체 사용자 수
+    - 전체 회원 / 오늘 신규회원
+    - 전체 방문자수(누적) / 오늘 방문자수(근사치: 오늘 popup_last_seen_at 갱신)
+    - 전체 구인글/오늘 구인글 (post_type=1)
+    - 전체 광고글/오늘 광고글 (post_type=4)
+    - 전체 수다글/오늘 수다글 (post_type=3)
+    - 기존 호환을 위해 new_sites/realtime_visitors도 함께 내려줍니다.
     """
     try:
         now_kst = datetime.now(tz=KST)
         today_kst = now_kst.date()
         start_utc, end_utc = _kst_today_bounds_utc()
 
-        new_sites = (
+        # posts: today
+        today_job_posts = (
             db.query(func.count(Community_Post.id))
             .filter(
                 Community_Post.post_type == 1,
+                Community_Post.status == "published",
                 Community_Post.created_at >= start_utc,
                 Community_Post.created_at < end_utc,
             )
+            .scalar()
+            or 0
+        )
+
+        today_ad_posts = (
+            db.query(func.count(Community_Post.id))
+            .filter(
+                Community_Post.post_type == 4,
+                Community_Post.status == "published",
+                Community_Post.created_at >= start_utc,
+                Community_Post.created_at < end_utc,
+            )
+            .scalar()
+            or 0
+        )
+
+        today_chat_posts = (
+            db.query(func.count(Community_Post.id))
+            .filter(
+                Community_Post.post_type == 3,
+                Community_Post.status == "published",
+                Community_Post.created_at >= start_utc,
+                Community_Post.created_at < end_utc,
+            )
+            .scalar()
+            or 0
+        )
+
+        # posts: total
+        total_job_posts = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 1, Community_Post.status == "published")
+            .scalar()
+            or 0
+        )
+
+        total_ad_posts = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 4, Community_Post.status == "published")
+            .scalar()
+            or 0
+        )
+
+        total_chat_posts = (
+            db.query(func.count(Community_Post.id))
+            .filter(Community_Post.post_type == 3, Community_Post.status == "published")
             .scalar()
             or 0
         )
@@ -2307,13 +2374,20 @@ def community_today_stats(db: Session = Depends(get_db)):
             or 0
         )
 
-        visitors = (
+        today_visitors = (
             db.query(func.count(Community_User.id))
             .filter(
                 Community_User.popup_last_seen_at.isnot(None),
                 Community_User.popup_last_seen_at >= start_utc,
                 Community_User.popup_last_seen_at < end_utc,
             )
+            .scalar()
+            or 0
+        )
+
+        total_visitors = (
+            db.query(func.count(Community_User.id))
+            .filter(Community_User.popup_last_seen_at.isnot(None))
             .scalar()
             or 0
         )
@@ -2327,13 +2401,39 @@ def community_today_stats(db: Session = Depends(get_db)):
         return {
             "status": 0,
             "date": today_kst.isoformat(),
-            "new_sites": int(new_sites),
-            "realtime_visitors": int(visitors),
-            "new_users": int(new_users),
+            # required fields (new)
             "total_users": int(total_users),
+            "new_users": int(new_users),
+            "total_visitors": int(total_visitors),
+            "today_visitors": int(today_visitors),
+            "total_job_posts": int(total_job_posts),
+            "today_job_posts": int(today_job_posts),
+            "total_ad_posts": int(total_ad_posts),
+            "today_ad_posts": int(today_ad_posts),
+            "total_chat_posts": int(total_chat_posts),
+            "today_chat_posts": int(today_chat_posts),
+            # backward compatible aliases
+            "new_sites": int(today_job_posts),
+            "realtime_visitors": int(today_visitors),
         }
     except Exception:
-        return {"status": 8, "date": None, "new_sites": 0, "realtime_visitors": 0, "new_users": 0, "total_users": 0}
+        return {
+            "status": 8,
+            "date": None,
+            "total_users": 0,
+            "new_users": 0,
+            "total_visitors": 0,
+            "today_visitors": 0,
+            "total_job_posts": 0,
+            "today_job_posts": 0,
+            "total_ad_posts": 0,
+            "today_ad_posts": 0,
+            "total_chat_posts": 0,
+            "today_chat_posts": 0,
+            # backward compatible aliases
+            "new_sites": 0,
+            "realtime_visitors": 0,
+        }
 
 
 @app.get("/community/cash/{username}")
@@ -2814,8 +2914,24 @@ def delete_user(username: str, db: Session = Depends(get_db)):
     if not user:
         return {"status": 1}   
 
+    deleted_username = user.username
     db.delete(user)
     db.commit()
+
+    # 회원 탈퇴 푸쉬 알림(오너 대상) - 실패해도 탈퇴 성공 처리
+    try:
+        notify_owners_event(
+            db,
+            title="회원탈퇴 알림",
+            body=f"회원 탈퇴: {deleted_username}",
+            data={"event": "withdraw", "username": deleted_username},
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] notify_owners_event(withdraw) failed:", e)
 
     return {"status": 0}
 
@@ -3008,6 +3124,8 @@ class PostCreate(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
+    other_role_name: Optional[str] = None
+    other_role_fee: Optional[str] = None
     post_type: Optional[float] = None
     card_type: Optional[float] = None
 
@@ -3073,6 +3191,8 @@ class PostOut(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
+    other_role_name: Optional[str] = None
+    other_role_fee: Optional[str] = None
     post_type: Optional[float] = None
     card_type: Optional[float] = None
     
@@ -3137,6 +3257,8 @@ class PostOut2(BaseModel):
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
     agent: Optional[str] = None
+    other_role_name: Optional[str] = None
+    other_role_fee: Optional[str] = None
     post_type: Optional[float] = None
     card_type: Optional[float] = None
 
@@ -3202,6 +3324,8 @@ class PostUpdate(BaseModel):
     item4_use: Optional[bool] = None
     item4_type: Optional[str] = None
     item4_sup: Optional[str] = None
+    other_role_name: Optional[str] = None
+    other_role_fee: Optional[str] = None
     agent: Optional[str] = None
     post_type: Optional[float] = None
     card_type: Optional[float] = None
@@ -3359,6 +3483,8 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_type = body.item4_type,
         item4_sup = body.item4_sup,
         agent = body.agent,
+        other_role_name=body.other_role_name,
+        other_role_fee=body.other_role_fee,
         post_type= 1,
         card_type= card_type,
     )
@@ -3374,6 +3500,23 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
     _rollover_recruit_card_types(db)
     db.commit()
     db.refresh(post)
+
+    # 글 등록 푸쉬 알림(관리자 대상) - 실패해도 글 등록 성공 처리
+    try:
+        notify_admin_acknowledged_post(
+            db,
+            post_id=int(post.id),
+            post_type=1,
+            author_username=username,
+            post_title=post.title,
+            exclude_user_id=int(userId),
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] notify_admin_acknowledged_post failed:", e)
 
     return PostOut(
         id=post.id,
@@ -3433,6 +3576,8 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
+        other_role_name=getattr(post, "other_role_name", None),
+        other_role_fee=getattr(post, "other_role_fee", None),
         post_type=post.post_type,
         card_type=post.card_type,
     )
@@ -3540,6 +3685,8 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         item4_type = body.item4_type,
         item4_sup = body.item4_sup,
         agent = body.agent,
+        other_role_name=body.other_role_name,
+        other_role_fee=body.other_role_fee,
         post_type=post_type,
         card_type=card_type,
     )
@@ -3555,18 +3702,23 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     db.commit()
     db.refresh(post)
 
-    if post_type == 3:
-        admin_ids = [1, 10, 13, 20, 21, 22, 23, 24, 25, 26, 27, 28]
-
-        for admin_id in admin_ids:
-            notify_admin_post(
+    # 글 등록 푸쉬 알림(관리자 대상) - 실패해도 글 등록 성공 처리
+    try:
+        if int(post_type) in (1, 3, 4):
+            notify_admin_acknowledged_post(
                 db,
-                title="새 수다글이 등록되었습니다",
-                body=f"{username}님이 새로운 수다글을 작성했습니다: {post.title}",
-                post_id=post.id,
-                target_user_id=admin_id,
-                post_type=3,
+                post_id=int(post.id),
+                post_type=int(post_type),
+                author_username=username,
+                post_title=post.title,
+                exclude_user_id=int(userId),
             )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] notify_admin_acknowledged_post failed:", e)
     return PostOut(
         id=post.id,
         author=PostAuthor(id=userId, username=username),
@@ -3625,6 +3777,8 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
+        other_role_name=getattr(post, "other_role_name", None),
+        other_role_fee=getattr(post, "other_role_fee", None),
         post_type=post.post_type,
         card_type=post.card_type,
     )
@@ -3883,6 +4037,8 @@ def list_posts(
             item4_type = p.item4_type,
             item4_sup = p.item4_sup,
             agent = p.agent,
+            other_role_name=getattr(p, "other_role_name", None),
+            other_role_fee=getattr(p, "other_role_fee", None),
             post_type=p.post_type,
             card_type=p.card_type,   
         )
@@ -4036,6 +4192,8 @@ def list_posts_plus(
             item4_type = p.item4_type,
             item4_sup = p.item4_sup,
             agent = p.agent,
+            other_role_name=getattr(p, "other_role_name", None),
+            other_role_fee=getattr(p, "other_role_fee", None),
             post_type=p.post_type,
             card_type=p.card_type,   
         )
@@ -4146,6 +4304,8 @@ def list_my_posts_by_type(
             item4_type = p.item4_type,
             item4_sup = p.item4_sup,
             agent = p.agent,
+            other_role_name=getattr(p, "other_role_name", None),
+            other_role_fee=getattr(p, "other_role_fee", None),
             post_type=p.post_type,
             card_type=p.card_type,
         )
@@ -4222,6 +4382,8 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
         item4_type = p.item4_type,
         item4_sup = p.item4_sup,
         agent = p.agent,
+        other_role_name=getattr(p, "other_role_name", None),
+        other_role_fee=getattr(p, "other_role_fee", None),
         post_type=p.post_type,
         card_type=p.card_type,
     )
@@ -4314,6 +4476,8 @@ def update_post(
         item4_type = post.item4_type,
         item4_sup = post.item4_sup,
         agent = post.agent,
+        other_role_name=getattr(post, "other_role_name", None),
+        other_role_fee=getattr(post, "other_role_fee", None),
         post_type=post.post_type,
         card_type=post.card_type,   
     )
@@ -5265,6 +5429,104 @@ def notify_admin_post(db: Session, title: str, body: str, post_id: int, target_u
         )
 
     return noti
+
+
+def notify_admin_acknowledged_post(
+    db: Session,
+    *,
+    post_id: int,
+    post_type: int,
+    author_username: str,
+    post_title: str,
+    exclude_user_id: int | None = None,
+):
+    """
+    구인/수다/광고 글 등록 시 관리자(admin_acknowledged=True)에게 푸쉬 + 미확인 알림 저장.
+    - 알림 실패는 글 등록 결과에 영향을 주지 않도록 호출부에서 try/except 처리 권장.
+    """
+    pt = int(post_type)
+    label = "글"
+    if pt == 1:
+        label = "구인글"
+    elif pt == 3:
+        label = "수다글"
+    elif pt == 4:
+        label = "광고글"
+
+    title = f"새 {label}이 등록되었습니다"
+    body = f"{author_username}님이 새로운 {label}을 작성했습니다: {post_title}"
+    data = {"post_id": int(post_id), "post_type": int(pt)}
+
+    admins = (
+        db.query(Community_User)
+        .filter(Community_User.admin_acknowledged.is_(True))
+        .all()
+    )
+
+    for a in admins:
+        if exclude_user_id is not None and int(getattr(a, "id", 0) or 0) == int(exclude_user_id):
+            continue
+        try:
+            create_notification(
+                db,
+                user_id=int(a.id),
+                title=title,
+                body=body,
+                type="post",
+                data=data,
+                commit=True,
+            )
+        except Exception:
+            # 세션이 실패 상태가 되면 다음 루프에서 계속 실패하므로 롤백
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+
+        try:
+            token = getattr(a, "push_token", None)
+            if token:
+                send_push(token, title, body, data)
+        except Exception:
+            # 푸쉬 실패는 무시
+            pass
+
+
+def notify_owners_event(db: Session, title: str, body: str, data: dict | None = None):
+    """
+    회원가입/탈퇴 등 시스템 이벤트를 오너(is_owner=True)에게 푸쉬 + 미확인 알림 저장.
+    """
+    owners = (
+        db.query(Community_User)
+        .filter(Community_User.is_owner.is_(True))
+        .all()
+    )
+    payload = data or {}
+    for o in owners:
+        try:
+            create_notification(
+                db,
+                user_id=int(o.id),
+                title=title,
+                body=body,
+                type="system",
+                data=payload,
+                commit=True,
+            )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+
+        try:
+            token = getattr(o, "push_token", None)
+            if token:
+                send_push(token, title, body, payload)
+        except Exception:
+            pass
 
 
 def send_push(token, title, body, data=None, badge=1):
