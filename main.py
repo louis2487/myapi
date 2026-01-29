@@ -63,9 +63,9 @@ KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKA
 # 요구사항:
 # - 구인글(post_type=1)은 write.tsx에서 항상 card_type=1로 등록됨
 # - 서버에서 card_type=1 글이 30개 초과 시: 가장 오래된 1유형을 2유형으로 변경
-# - 서버에서 card_type=2 글이 70개 초과 시: 가장 오래된 2유형을 3유형으로 변경
+# - 서버에서 card_type=2 글이 40개 초과 시: 가장 오래된 2유형을 3유형으로 변경
 CARD1_MAX = 30
-CARD2_MAX = 70
+CARD2_MAX = 40
 AD_CARD1_MAX = 5
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
@@ -153,7 +153,7 @@ def _rollover_recruit_card_types(db: Session) -> None:
     """
     구인글(post_type=1) 카드 타입을 개수 제한에 맞춰 롤오버합니다.
     - card_type=1 -> 2 (30개 초과분을 오래된 순으로)
-    - card_type=2 -> 3 (70개 초과분을 오래된 순으로)
+    - card_type=2 -> 3 (40개 초과분을 오래된 순으로)
     같은 트랜잭션 안에서 호출되어야 합니다.
     """
     # 1유형: 30개 유지
@@ -183,7 +183,7 @@ def _rollover_recruit_card_types(db: Session) -> None:
         oldest1.card_type = 2
         db.add(oldest1)
 
-    # 2유형: 70개 유지 (초과분을 3유형으로)
+    # 2유형: 40개 유지 (초과분을 3유형으로)
     while True:
         c2 = (
             db.query(func.count(Community_Post.id))
@@ -241,6 +241,26 @@ def _rollover_ad_card_types(db: Session) -> None:
             break
         oldest1.card_type = 2
         db.add(oldest1)
+
+
+@app.on_event("startup")
+def _startup_enforce_recruit_card_limits() -> None:
+    """
+    서버 기동 시 구인글(post_type=1)의 card_type 개수 제한을 1회 적용.
+    - 기존 데이터에 card_type=2가 40개를 초과해서 쌓여있는 경우(예: 70개)도 즉시 정리됩니다.
+    """
+    db = SessionLocal()
+    try:
+        _rollover_recruit_card_types(db)
+        db.commit()
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] startup recruit card rollover failed:", e)
+    finally:
+        db.close()
 
 # -------------------- TossPayments (SSOT) --------------------
 # clientKey: 결제 페이지(HTML)에서만 사용
