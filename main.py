@@ -3064,13 +3064,13 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
         )
         .filter(
             Community_Post.user_id == user.id,
-            Community_Post.post_type.in_([1, 3, 4]),
+            Community_Post.post_type.in_([1, 3, 4, 6]),
         )
         .group_by(Community_Post.post_type)
         .all()
     )
 
-    counts = {1: 0, 3: 0, 4: 0}
+    counts = {1: 0, 3: 0, 4: 0, 6: 0}
     for post_type, cnt in rows:
         counts[post_type] = cnt
 
@@ -3100,6 +3100,7 @@ def get_mypage(username: str, db: Session = Depends(get_db)):
             "type1": counts[1],
             "type3": counts[3],
             "type4": counts[4],
+            "type6": counts[6],
         },
         "point_balance": user.point_balance if user.point_balance is not None else 0,
         "cash_balance": user.cash_balance if user.cash_balance is not None else 0,
