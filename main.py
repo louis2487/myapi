@@ -3855,9 +3855,9 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     db.commit()
     db.refresh(post)
 
-    # 글 등록 푸쉬 알림(관리자 대상) - 실패해도 글 등록 성공 처리
+    # 글 등록 푸쉬 알림 - 실패해도 글 등록 성공 처리
     try:
-        if int(post_type) in (1, 3, 4):
+        if int(post_type) in (1, 3, 4, 6):
             notify_admin_acknowledged_post(
                 db,
                 post_id=int(post.id),
@@ -3866,12 +3866,20 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
                 post_title=post.title,
                 exclude_user_id=int(userId),
             )
+        elif int(post_type) == 5:
+            notify_all_push_post(
+                db,
+                post_id=int(post.id),
+                post_type=int(post_type),
+                author_username=username,
+                post_title=post.title,
+            )
     except Exception as e:
         try:
             db.rollback()
         except Exception:
             pass
-        print("[WARN] notify_admin_acknowledged_post failed:", e)
+        print("[WARN] post notify(push) failed:", e)
     return PostOut(
         id=post.id,
         author=PostAuthor(id=userId, username=username),
@@ -5653,6 +5661,8 @@ def notify_admin_acknowledged_post(
         label = "수다글"
     elif pt == 4:
         label = "광고글"
+    elif pt == 6:
+        label = "문의글"
 
     title = f"새 {label}이 등록되었습니다"
     body = f"{author_username}님이 새로운 {label}을 작성했습니다: {post_title}"
@@ -5691,6 +5701,68 @@ def notify_admin_acknowledged_post(
                 send_push(token, title, body, data)
         except Exception:
             # 푸쉬 실패는 무시
+            pass
+
+
+def notify_all_push_post(
+    db: Session,
+    *,
+    post_id: int,
+    post_type: int,
+    author_username: str,
+    post_title: str,
+):
+    """
+    공지사항 등 "전체 푸쉬"가 필요한 글에 대해,
+    push_token이 있는 전체 사용자에게 푸쉬 + 알림 저장.
+
+    - 대상이 많을 수 있어 Notification은 한 번에 커밋합니다.
+    - 푸쉬 실패는 무시합니다(글 등록 성공 우선).
+    """
+    pt = int(post_type)
+    label = "글"
+    if pt == 5:
+        label = "공지사항"
+
+    title = f"새 {label}이 등록되었습니다"
+    body = f"{post_title}"
+    data = {"post_id": int(post_id), "post_type": int(pt)}
+
+    # "전체"의 기준: push_token이 있는 사용자(푸쉬 수신 가능)
+    targets = (
+        db.query(Community_User.id, Community_User.push_token)
+        .filter(
+            Community_User.push_token.isnot(None),
+            Community_User.push_token != "",
+        )
+        .all()
+    )
+
+    # 알림 저장(한 번에 커밋)
+    try:
+        for uid, _token in targets:
+            db.add(
+                Notification(
+                    user_id=int(uid),
+                    title=title,
+                    body=body,
+                    type="post",
+                    data=data,
+                )
+            )
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    # 푸쉬 발송(best-effort)
+    for _uid, token in targets:
+        try:
+            if token:
+                send_push(token, title, body, data)
+        except Exception:
             pass
 
 
