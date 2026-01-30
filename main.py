@@ -527,13 +527,19 @@ def _ensure_community_posts_columns() -> None:
 
                       ADD COLUMN IF NOT EXISTS total_use boolean NULL,
                       ADD COLUMN IF NOT EXISTS branch_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS hq_use boolean NULL,
                       ADD COLUMN IF NOT EXISTS leader_use boolean NULL,
                       ADD COLUMN IF NOT EXISTS member_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS team_use boolean NULL,
+                      ADD COLUMN IF NOT EXISTS each_use boolean NULL,
 
                       ADD COLUMN IF NOT EXISTS total_fee varchar(255) NULL,
                       ADD COLUMN IF NOT EXISTS branch_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS hq_fee varchar(255) NULL,
                       ADD COLUMN IF NOT EXISTS leader_fee varchar(255) NULL,
                       ADD COLUMN IF NOT EXISTS member_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS team_fee varchar(255) NULL,
+                      ADD COLUMN IF NOT EXISTS each_fee varchar(255) NULL,
 
                       ADD COLUMN IF NOT EXISTS pay_use boolean NULL,
                       ADD COLUMN IF NOT EXISTS meal_use boolean NULL,
@@ -3203,12 +3209,18 @@ class PostCreate(BaseModel):
     highlight_content: Optional[str] = None
     total_use: Optional[bool] = None
     branch_use: Optional[bool] = None
+    hq_use: Optional[bool] = None
     leader_use: Optional[bool] = None
     member_use: Optional[bool] = None
+    team_use: Optional[bool] = None
+    each_use: Optional[bool] = None
     total_fee: Optional[str] = None
     branch_fee: Optional[str] = None
+    hq_fee: Optional[str] = None
     leader_fee: Optional[str] = None
     member_fee: Optional[str] = None
+    team_fee: Optional[str] = None
+    each_fee: Optional[str] = None
     pay_use: Optional[bool] = None
     meal_use: Optional[bool] = None
     house_use: Optional[bool] = None
@@ -3270,12 +3282,18 @@ class PostOut(BaseModel):
     highlight_content: Optional[str] = None
     total_use: Optional[bool] = None
     branch_use: Optional[bool] = None
+    hq_use: Optional[bool] = None
     leader_use: Optional[bool] = None
     member_use: Optional[bool] = None
+    team_use: Optional[bool] = None
+    each_use: Optional[bool] = None
     total_fee: Optional[str] = None
     branch_fee: Optional[str] = None
+    hq_fee: Optional[str] = None
     leader_fee: Optional[str] = None
     member_fee: Optional[str] = None
+    team_fee: Optional[str] = None
+    each_fee: Optional[str] = None
     pay_use: Optional[bool] = None
     meal_use: Optional[bool] = None
     house_use: Optional[bool] = None
@@ -3336,12 +3354,18 @@ class PostOut2(BaseModel):
     highlight_content: Optional[str] = None
     total_use: Optional[bool] = None
     branch_use: Optional[bool] = None
+    hq_use: Optional[bool] = None
     leader_use: Optional[bool] = None
     member_use: Optional[bool] = None
+    team_use: Optional[bool] = None
+    each_use: Optional[bool] = None
     total_fee: Optional[str] = None
     branch_fee: Optional[str] = None
+    hq_fee: Optional[str] = None
     leader_fee: Optional[str] = None
     member_fee: Optional[str] = None
+    team_fee: Optional[str] = None
+    each_fee: Optional[str] = None
     pay_use: Optional[bool] = None
     meal_use: Optional[bool] = None
     house_use: Optional[bool] = None
@@ -3404,12 +3428,18 @@ class PostUpdate(BaseModel):
     highlight_content: Optional[str] = None
     total_use: Optional[bool] = None
     branch_use: Optional[bool] = None
+    hq_use: Optional[bool] = None
     leader_use: Optional[bool] = None
     member_use: Optional[bool] = None
+    team_use: Optional[bool] = None
+    each_use: Optional[bool] = None
     total_fee: Optional[str] = None
     branch_fee: Optional[str] = None
+    hq_fee: Optional[str] = None
     leader_fee: Optional[str] = None
     member_fee: Optional[str] = None
+    team_fee: Optional[str] = None
+    each_fee: Optional[str] = None
     pay_use: Optional[bool] = None
     meal_use: Optional[bool] = None
     house_use: Optional[bool] = None
@@ -3562,12 +3592,18 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         highlight_content = body.highlight_content,
         total_use = body.total_use,
         branch_use = body.branch_use,
+        hq_use = getattr(body, "hq_use", None),
         leader_use = body.leader_use,
         member_use = body.member_use,
+        team_use = getattr(body, "team_use", None),
+        each_use = getattr(body, "each_use", None),
         total_fee = body.total_fee,
         branch_fee = body.branch_fee,
+        hq_fee = getattr(body, "hq_fee", None),
         leader_fee = body.leader_fee,
         member_fee = body.member_fee,
+        team_fee = getattr(body, "team_fee", None),
+        each_fee = getattr(body, "each_fee", None),
         pay_use = body.pay_use,
         meal_use = body.meal_use,
         house_use = body.house_use,
@@ -3655,12 +3691,18 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         highlight_content = post.highlight_content,
         total_use = post.total_use,
         branch_use = post.branch_use,
+        hq_use = getattr(post, "hq_use", None),
         leader_use = post.leader_use,
         member_use = post.member_use,
+        team_use = getattr(post, "team_use", None),
+        each_use = getattr(post, "each_use", None),
         total_fee = post.total_fee,
         branch_fee = post.branch_fee,
+        hq_fee = getattr(post, "hq_fee", None),
         leader_fee = post.leader_fee,
         member_fee = post.member_fee,
+        team_fee = getattr(post, "team_fee", None),
+        each_fee = getattr(post, "each_fee", None),
         pay_use = post.pay_use,
         meal_use = post.meal_use,
         house_use = post.house_use,
@@ -3764,12 +3806,18 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         highlight_content = body.highlight_content,
         total_use = body.total_use,
         branch_use = body.branch_use,
+        hq_use = getattr(body, "hq_use", None),
         leader_use = body.leader_use,
         member_use = body.member_use,
+        team_use = getattr(body, "team_use", None),
+        each_use = getattr(body, "each_use", None),
         total_fee = body.total_fee,
         branch_fee = body.branch_fee,
+        hq_fee = getattr(body, "hq_fee", None),
         leader_fee = body.leader_fee,
         member_fee = body.member_fee,
+        team_fee = getattr(body, "team_fee", None),
+        each_fee = getattr(body, "each_fee", None),
         pay_use = body.pay_use,
         meal_use = body.meal_use,
         house_use = body.house_use,
@@ -3856,12 +3904,18 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         highlight_content = post.highlight_content,
         total_use = post.total_use,
         branch_use = post.branch_use,
+        hq_use = getattr(post, "hq_use", None),
         leader_use = post.leader_use,
         member_use = post.member_use,
+        team_use = getattr(post, "team_use", None),
+        each_use = getattr(post, "each_use", None),
         total_fee = post.total_fee,
         branch_fee = post.branch_fee,
+        hq_fee = getattr(post, "hq_fee", None),
         leader_fee = post.leader_fee,
         member_fee = post.member_fee,
+        team_fee = getattr(post, "team_fee", None),
+        each_fee = getattr(post, "each_fee", None),
         pay_use = post.pay_use,
         meal_use = post.meal_use,
         house_use = post.house_use,
@@ -4558,12 +4612,18 @@ def update_post(
         highlight_content = post.highlight_content,
         total_use = post.total_use,
         branch_use = post.branch_use,
+        hq_use = getattr(post, "hq_use", None),
         leader_use = post.leader_use,
         member_use = post.member_use,
+        team_use = getattr(post, "team_use", None),
+        each_use = getattr(post, "each_use", None),
         total_fee = post.total_fee,
         branch_fee = post.branch_fee,
+        hq_fee = getattr(post, "hq_fee", None),
         leader_fee = post.leader_fee,
         member_fee = post.member_fee,
+        team_fee = getattr(post, "team_fee", None),
+        each_fee = getattr(post, "each_fee", None),
         pay_use = post.pay_use,
         meal_use = post.meal_use,
         house_use = post.house_use,
