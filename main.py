@@ -55,7 +55,8 @@ SECRET_RSS_TOKEN = "rss-secret-token"
 
 # -------------------- Kakao (recode: geocode + route distance) --------------------
 # 역지오코딩: Kakao Local REST API Key
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip()
+SMART_KAKAO_KEY = os.getenv("SMART_KAKAO_KEY", "").strip()
+KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip() or SMART_KAKAO_KEY
 # 도로거리: Kakao Mobility(Navi) API Key (프로젝트에 따라 REST 키와 동일할 수 있음)
 KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKAO_REST_API_KEY
 
@@ -66,7 +67,13 @@ KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKA
 # - 서버에서 card_type=2 글이 70개 초과 시: 가장 오래된 2유형을 3유형으로 변경
 CARD1_MAX = 30
 CARD2_MAX = 70
-AD_CARD1_MAX = 5
+# 광고글(post_type=4): 카테고리(job_industry)별 목록 개수 제한
+AD_CARD1_MAX = 5  # (=카테고리별 최대 published 개수)
+AD_CATEGORIES: tuple[str, ...] = ("광고", "대출", "급매물", "중고장터")
+
+def _normalize_ad_job_industry(job_industry: str | None) -> str:
+    v = (job_industry or "").strip()
+    return v if v in AD_CATEGORIES else "광고"
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
     # 등급 달성 보상 포인트(1회성)
@@ -293,38 +300,53 @@ def _rollover_recruit_card_types(db: Session) -> None:
 
 def _rollover_ad_card_types(db: Session) -> None:
     """
-    광고글(post_type=4) 카드 1유형(card_type=1)을 최대 개수로 제한합니다.
-    - card_type=1 -> 2 (5개 초과분을 오래된 순으로)
+    광고글(post_type=4): 카테고리(job_industry)별로 card_type=1을 최대 5개만 유지합니다.
+    - 초과분(오래된 순)은 card_type=2로 강등
     같은 트랜잭션 안에서 호출되어야 합니다.
     """
-    while True:
-        c1 = (
-            db.query(func.count(Community_Post.id))
-            .filter(
-                Community_Post.post_type == 4,
-                Community_Post.card_type == 1,
+    for cat in AD_CATEGORIES:
+        # 기존 레거시 데이터(카테고리 누락)는 '광고'로 취급(프론트 list4.tsx의 기본 매핑과 동일)
+        if cat == "광고":
+            cat_filter = or_(
+                Community_Post.job_industry == "광고",
+                Community_Post.job_industry.is_(None),
+                Community_Post.job_industry == "",
             )
-            .scalar()
-            or 0
-        )
-        if c1 <= AD_CARD1_MAX:
-            break
+        else:
+            cat_filter = (Community_Post.job_industry == cat)
 
-        oldest1 = (
-            db.query(Community_Post)
-            .filter(
-                Community_Post.post_type == 4,
-                Community_Post.card_type == 1,
+        while True:
+            c1 = (
+                db.query(func.count(Community_Post.id))
+                .filter(
+                    Community_Post.post_type == 4,
+                    Community_Post.status == "published",
+                    cat_filter,
+                    Community_Post.card_type == 1,
+                )
+                .scalar()
+                or 0
             )
-            .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
-            .enable_eagerloads(False)
-            .with_for_update()
-            .first()
-        )
-        if not oldest1:
-            break
-        oldest1.card_type = 2
-        db.add(oldest1)
+            if c1 <= AD_CARD1_MAX:
+                break
+
+            oldest1 = (
+                db.query(Community_Post)
+                .filter(
+                    Community_Post.post_type == 4,
+                    Community_Post.status == "published",
+                    cat_filter,
+                    Community_Post.card_type == 1,
+                )
+                .order_by(Community_Post.created_at.asc(), Community_Post.id.asc())
+                .enable_eagerloads(False)
+                .with_for_update()
+                .first()
+            )
+            if not oldest1:
+                break
+            oldest1.card_type = 2
+            db.add(oldest1)
 
 
 @app.on_event("startup")
@@ -763,6 +785,59 @@ def _kakao_route_distance_km(start_lat: float, start_lng: float, end_lat: float,
         print(f"[WARN] kakao directions distance failed: {e}")
         return None
 
+
+class KakaoDrivingInfoOut(BaseModel):
+    distance_meters: int
+    duration_seconds: int
+
+
+@app.get("/kakao/driving-info", response_model=KakaoDrivingInfoOut)
+def kakao_driving_info(
+    start_lat: float = Query(..., description="출발 위도"),
+    start_lng: float = Query(..., description="출발 경도"),
+    end_lat: float = Query(..., description="도착 위도"),
+    end_lng: float = Query(..., description="도착 경도"),
+):
+    """
+    안드로이드 앱에서 카카오 API 키를 들고 있지 않도록,
+    서버가 Kakao Mobility 길찾기 API를 대신 호출해 distance/duration을 내려줍니다.
+    """
+    if not KAKAO_MOBILITY_API_KEY:
+        raise HTTPException(status_code=503, detail="Kakao API key is not configured")
+
+    try:
+        r = requests.get(
+            "https://apis-navi.kakaomobility.com/v1/directions",
+            params={
+                "origin": f"{start_lng},{start_lat}",
+                "destination": f"{end_lng},{end_lat}",
+                "priority": "RECOMMEND",
+                "summary": "true",
+            },
+            headers=_kakao_auth_header(KAKAO_MOBILITY_API_KEY),
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        routes = data.get("routes") or []
+        if not routes:
+            raise HTTPException(status_code=502, detail="Kakao directions returned empty routes")
+
+        summary = (routes[0] or {}).get("summary") or {}
+        dist_m = summary.get("distance")
+        dur_s = summary.get("duration")
+        if dist_m is None or dur_s is None:
+            raise HTTPException(status_code=502, detail="Kakao directions returned invalid summary")
+
+        return {
+            "distance_meters": int(dist_m),
+            "duration_seconds": int(dur_s),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Kakao directions request failed: {e}")
+
 # 앱 시작 시 referral/point 테이블의 제약조건을 모두 제거
 _drop_all_constraints_on_table("referral")
 _drop_all_constraints_on_table("point")
@@ -783,6 +858,18 @@ def get_db():
 class RuntimePayload(BaseModel):
     user_id: str
     runtime_seconds: int
+
+class RuntimeUpdateIn(RuntimePayload):
+    """
+    주기 업데이트:
+    - runtime_seconds 누적(/runtime/update 기존 기능)
+    - (선택) 운행일지(recode)의 도착지/거리/운행시간을 실시간 반영
+    """
+    recode_id: int | None = None
+    end_location: str | None = None
+    trip_km: float | None = None
+    duration_seconds: int | None = None
+    offtime: str | None = None
 
 class SignupRequest(BaseModel):
     username: str
@@ -838,7 +925,7 @@ class RecodeListOut(BaseModel):
     recodes: list[RecodeOut]
 
 @app.post("/runtime/update")
-def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
+def update_runtime(payload: RuntimeUpdateIn, db: Session = Depends(get_db)):
     stmt = insert(RuntimeRecord).values(
         user_id=payload.user_id,
         runtime_seconds=payload.runtime_seconds
@@ -859,10 +946,49 @@ def update_runtime(payload: RuntimePayload, db: Session = Depends(get_db)):
               .filter(RuntimeRecord.user_id == payload.user_id)\
               .scalar()
 
+    recode_updated = False
+    # ✅ recode 진행상황(도착지/거리/운행시간) 반영
+    if payload.recode_id is not None:
+        try:
+            r = (
+                db.query(Recode)
+                .filter(Recode.id == payload.recode_id, Recode.username == payload.user_id)
+                .first()
+            )
+            if r:
+                end_loc = (payload.end_location or "").strip()
+                if end_loc:
+                    r.end_location = end_loc
+                if payload.trip_km is not None:
+                    try:
+                        r.trip_km = float(payload.trip_km)
+                    except Exception:
+                        pass
+                if payload.duration_seconds is not None:
+                    try:
+                        r.duration = max(int(payload.duration_seconds), 0)
+                        r.duration_minutes = int(r.duration) // 60
+                    except Exception:
+                        pass
+                off = (payload.offtime or "").strip()
+                if off:
+                    r.offtime = off
+
+                # 출발지가 비어있으면 도착지를 출발지로 보정
+                if (not (r.start_location or "").strip()) and (r.end_location or "").strip():
+                    r.start_location = r.end_location
+
+                db.add(r)
+                db.commit()
+                recode_updated = True
+        except Exception:
+            db.rollback()
+
     return {
         "status": "ok",
         "user_id": payload.user_id,
-        "total_runtime": total
+        "total_runtime": total,
+        "recode_updated": recode_updated,
     }
 
 
@@ -972,6 +1098,12 @@ def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
     except Exception:
         duration_minutes = None
 
+    # ✅ 출발지가 비어있으면 도착지를 출발지로 보정(클라이언트/지오코딩 실패 대비)
+    start_loc = (recode.start_location or "").strip()
+    end_loc = (recode.end_location or "").strip()
+    if (not start_loc) and end_loc:
+        start_loc = end_loc
+
     new_r = Recode(  
         username=recode.username,
         user_id=uid,
@@ -980,15 +1112,16 @@ def add_recode(recode: RecodeCreate, db: Session = Depends(get_db)):
         offtime=recode.offtime,
         duration=recode.duration,
         duration_minutes=duration_minutes,
-        start_location=recode.start_location,
-        end_location=recode.end_location,
+        start_location=start_loc or None,
+        end_location=end_loc or None,
         trip_km=recode.trip_km,
         trip_purpose=recode.trip_purpose,
         business_use=bool(recode.business_use),
     )
     db.add(new_r)
     db.commit()
-    return {"status":"success"}
+    db.refresh(new_r)
+    return {"status": "success", "id": new_r.id}
 
 
 
@@ -3776,7 +3909,15 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
             user.point_balance = int(user.point_balance or 0) + 1000
             db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
     else:
-        card_type = body.card_type
+        # 광고글(post_type=4): card_type은 항상 1로 고정(프론트 정책과 일치)
+        if int(post_type) == 4:
+            card_type = 1
+        else:
+            card_type = body.card_type
+
+    job_industry = body.job_industry
+    if int(post_type) == 4:
+        job_industry = _normalize_ad_job_industry(body.job_industry)
 
     post = Community_Post(
         user_id=userId,
@@ -3792,7 +3933,7 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         workplace_lng = body.workplace_lng,
         business_lat = body.business_lat,
         business_lng = body.business_lng,
-        job_industry=body.job_industry,
+        job_industry=job_industry,
         job_category=body.job_category,
         pay_support=body.pay_support,
         meal_support=body.meal_support,
@@ -3850,7 +3991,7 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     if int(post_type) == 1:
         _rollover_recruit_card_types(db)
     elif int(post_type) == 4:
-        # 광고글(post_type=4): card_type=1 최대 5개 유지 (초과분은 오래된 순으로 2유형)
+        # 광고글(post_type=4): 카테고리별 최신 5개 published 유지 (초과분은 closed)
         _rollover_ad_card_types(db)
     db.commit()
     db.refresh(post)
@@ -4595,18 +4736,17 @@ def update_post(
 
     db.flush()
     # post_type=1(구인글): 마감/개시(status 변경) 포함, 항상 30/40 유지 롤오버 적용
-    # post_type=4(광고글): card_type=1이 5개를 초과하지 않도록 오래된 글을 2유형으로 롤오버
+    # post_type=4(광고글): 카테고리(job_industry)별 card_type=1 최대 5개 유지 (초과분은 2로 강등)
     try:
         pt = int(getattr(post, "post_type", 0) or 0)
     except Exception:
         pt = 0
-    try:
-        ct = int(getattr(post, "card_type", 0) or 0)
-    except Exception:
-        ct = 0
     if pt == 1:
         _rollover_recruit_card_types(db)
-    if pt == 4 and ct == 1:
+    if pt == 4:
+        # 광고글 정책: 카테고리 정규화
+        post.job_industry = _normalize_ad_job_industry(getattr(post, "job_industry", None))
+        db.add(post)
         _rollover_ad_card_types(db)
 
     db.commit()
