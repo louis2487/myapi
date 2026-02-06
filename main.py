@@ -4721,6 +4721,232 @@ def get_post(post_id: int, db: Session = Depends(get_db)):
     )
 
 
+@app.post("/community/posts/{post_id}/recreate/{username}", response_model=PostOut)
+def recreate_recruit_post(
+    post_id: int,
+    username: str,
+    db: Session = Depends(get_db),
+):
+    """
+    구인글(post_type=1) 재등록(복제 생성).
+    - 본인 글만 가능
+    - 구인글 작성 제한(제재/하루1회) 정책은 create_post와 동일 적용
+    - 새 글은 status="published", card_type=1 로 생성
+    """
+    src = db.query(Community_Post).filter(Community_Post.id == post_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # 유저 row lock으로 포인트/작성제한/생성 원자성 보장
+    user = (
+        db.query(Community_User)
+        .filter(Community_User.username == username)
+        .with_for_update()
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Invalid username")
+
+    userId = int(user.id)
+    if int(getattr(src, "user_id", 0) or 0) != userId:
+        raise HTTPException(status_code=403, detail="본인 글만 재등록할 수 있습니다.")
+
+    try:
+        pt = int(getattr(src, "post_type", 0) or 0)
+    except Exception:
+        pt = 0
+    if pt != 1:
+        raise HTTPException(status_code=400, detail="구인글만 재등록할 수 있습니다.")
+
+    is_admin_ack = bool(getattr(user, "admin_acknowledged", False))
+    now_utc = datetime.now(timezone.utc)
+
+    # admin_acknowledged=True 이면 구인글 작성 제한(제재/일일작성)을 우회하여 무제한 작성 가능
+    if not is_admin_ack:
+        _enforce_user_post_restriction(db, userId, 1)
+
+        kst = ZoneInfo("Asia/Seoul") if ZoneInfo else timezone(timedelta(hours=9))
+        now_kst = now_utc.astimezone(kst)
+        last = getattr(user, "last_recruit_posted_at", None)
+        if last is not None:
+            if getattr(last, "tzinfo", None) is None:
+                last = last.replace(tzinfo=timezone.utc)
+            last_kst = last.astimezone(kst)
+            if last_kst.date() == now_kst.date():
+                raise HTTPException(
+                    status_code=400,
+                    detail="하루에 한 번만 구인글을 작성할 수 있습니다. 자정 이후 다시 시도해주세요.",
+                )
+
+    # ---- 재등록(복제 생성) ----
+    post = Community_Post(
+        user_id=userId,
+        title=getattr(src, "title", None),
+        content=getattr(src, "content", None),
+        image_url=getattr(src, "image_url", None),
+        contract_fee=getattr(src, "contract_fee", None),
+        workplace_address=getattr(src, "workplace_address", None),
+        workplace_map_url=getattr(src, "workplace_map_url", None),
+        business_address=getattr(src, "business_address", None),
+        business_map_url=getattr(src, "business_map_url", None),
+        workplace_lat=getattr(src, "workplace_lat", None),
+        workplace_lng=getattr(src, "workplace_lng", None),
+        business_lat=getattr(src, "business_lat", None),
+        business_lng=getattr(src, "business_lng", None),
+        job_industry=getattr(src, "job_industry", None),
+        job_category=getattr(src, "job_category", None),
+        province=getattr(src, "province", None),
+        city=getattr(src, "city", None),
+        pay_support=getattr(src, "pay_support", None),
+        meal_support=getattr(src, "meal_support", None),
+        house_support=getattr(src, "house_support", None),
+        company_developer=getattr(src, "company_developer", None),
+        company_constructor=getattr(src, "company_constructor", None),
+        company_trustee=getattr(src, "company_trustee", None),
+        company_agency=getattr(src, "company_agency", None),
+        agency_call=getattr(src, "agency_call", None),
+        status="published",
+        highlight_color=getattr(src, "highlight_color", None),
+        highlight_content=getattr(src, "highlight_content", None),
+        total_use=getattr(src, "total_use", None),
+        branch_use=getattr(src, "branch_use", None),
+        hq_use=getattr(src, "hq_use", None),
+        leader_use=getattr(src, "leader_use", None),
+        member_use=getattr(src, "member_use", None),
+        team_use=getattr(src, "team_use", None),
+        each_use=getattr(src, "each_use", None),
+        total_fee=getattr(src, "total_fee", None),
+        branch_fee=getattr(src, "branch_fee", None),
+        hq_fee=getattr(src, "hq_fee", None),
+        leader_fee=getattr(src, "leader_fee", None),
+        member_fee=getattr(src, "member_fee", None),
+        team_fee=getattr(src, "team_fee", None),
+        each_fee=getattr(src, "each_fee", None),
+        pay_use=getattr(src, "pay_use", None),
+        meal_use=getattr(src, "meal_use", None),
+        house_use=getattr(src, "house_use", None),
+        pay_sup=getattr(src, "pay_sup", None),
+        meal_sup=getattr(src, "meal_sup", None),
+        house_sup=getattr(src, "house_sup", None),
+        item1_use=getattr(src, "item1_use", None),
+        item1_type=getattr(src, "item1_type", None),
+        item1_sup=getattr(src, "item1_sup", None),
+        item2_use=getattr(src, "item2_use", None),
+        item2_type=getattr(src, "item2_type", None),
+        item2_sup=getattr(src, "item2_sup", None),
+        item3_use=getattr(src, "item3_use", None),
+        item3_type=getattr(src, "item3_type", None),
+        item3_sup=getattr(src, "item3_sup", None),
+        item4_use=getattr(src, "item4_use", None),
+        item4_type=getattr(src, "item4_type", None),
+        item4_sup=getattr(src, "item4_sup", None),
+        agent=getattr(src, "agent", None),
+        other_role_name=getattr(src, "other_role_name", None),
+        other_role_fee=getattr(src, "other_role_fee", None),
+        post_type=1,
+        card_type=1,
+    )
+
+    # ---- 구인글 작성 보상: 1000포인트 지급 + 마지막 작성 시각 갱신 ----
+    if not is_admin_ack:
+        user.point_balance = int(getattr(user, "point_balance", 0) or 0) + 1000
+        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+    user.last_recruit_posted_at = now_utc
+
+    db.add(post)
+    db.flush()
+    _rollover_recruit_card_types(db)
+    db.commit()
+    db.refresh(post)
+
+    # 푸쉬 알림(관리자 대상) - 실패해도 글 등록 성공 처리
+    try:
+        notify_admin_acknowledged_post(
+            db,
+            post_id=int(post.id),
+            post_type=1,
+            author_username=username,
+            post_title=post.title,
+            exclude_user_id=userId,
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print("[WARN] notify_admin_acknowledged_post failed:", e)
+
+    return PostOut(
+        id=post.id,
+        author=PostAuthor(id=post.author.id, username=post.author.username),
+        title=post.title,
+        content=post.content,
+        image_url=post.image_url,
+        created_at=post.created_at,
+        contract_fee=post.contract_fee,
+        workplace_address=post.workplace_address,
+        workplace_map_url=post.workplace_map_url,
+        business_address=post.business_address,
+        business_map_url=post.business_map_url,
+        workplace_lat=post.workplace_lat,
+        workplace_lng=post.workplace_lng,
+        business_lat=post.business_lat,
+        business_lng=post.business_lng,
+        job_industry=post.job_industry,
+        job_category=post.job_category,
+        pay_support=post.pay_support,
+        meal_support=post.meal_support,
+        house_support=post.house_support,
+        company_developer=post.company_developer,
+        company_constructor=post.company_constructor,
+        company_trustee=post.company_trustee,
+        company_agency=post.company_agency,
+        agency_call=post.agency_call,
+        province=post.province,
+        city=post.city,
+        status=post.status,
+        highlight_color=post.highlight_color,
+        highlight_content=post.highlight_content,
+        total_use=post.total_use,
+        branch_use=post.branch_use,
+        hq_use=getattr(post, "hq_use", None),
+        leader_use=post.leader_use,
+        member_use=post.member_use,
+        team_use=getattr(post, "team_use", None),
+        each_use=getattr(post, "each_use", None),
+        total_fee=post.total_fee,
+        branch_fee=post.branch_fee,
+        hq_fee=getattr(post, "hq_fee", None),
+        leader_fee=post.leader_fee,
+        member_fee=post.member_fee,
+        team_fee=getattr(post, "team_fee", None),
+        each_fee=getattr(post, "each_fee", None),
+        pay_use=post.pay_use,
+        meal_use=post.meal_use,
+        house_use=post.house_use,
+        pay_sup=post.pay_sup,
+        meal_sup=post.meal_sup,
+        house_sup=post.house_sup,
+        item1_use=post.item1_use,
+        item1_type=post.item1_type,
+        item1_sup=post.item1_sup,
+        item2_use=post.item2_use,
+        item2_type=post.item2_type,
+        item2_sup=post.item2_sup,
+        item3_use=post.item3_use,
+        item3_type=post.item3_type,
+        item3_sup=post.item3_sup,
+        item4_use=post.item4_use,
+        item4_type=post.item4_type,
+        item4_sup=post.item4_sup,
+        agent=post.agent,
+        other_role_name=getattr(post, "other_role_name", None),
+        other_role_fee=getattr(post, "other_role_fee", None),
+        post_type=post.post_type,
+        card_type=post.card_type,
+    )
+
+
 @app.put("/community/posts/{post_id}", response_model=PostOut)
 def update_post(
     post_id: int,
