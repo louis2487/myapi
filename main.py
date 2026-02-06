@@ -5432,6 +5432,44 @@ def community_admin_get_user(
         except Exception:
             referred_items = []
 
+        # (추가) 이 회원을 "추천한" 사람(추천인)
+        # - referral.referred_user_id == user.id 로 조회
+        # - 추천인은 referral.referrer_user_id -> community_users.username 로 조회
+        # - 제약조건(FK)이 제거된 상태일 수 있으므로 안전하게 처리
+        referred_by_user_id = None
+        referred_by_username = None
+        referred_by_referrer_code = None
+        referred_by_created_at = None
+        try:
+            ref_row = (
+                db.query(Referral)
+                .filter(Referral.referred_user_id == user.id)
+                .order_by(Referral.created_at.desc().nullslast(), Referral.id.desc())
+                .first()
+            )
+            if ref_row:
+                try:
+                    referred_by_user_id = int(getattr(ref_row, "referrer_user_id", None))
+                except Exception:
+                    referred_by_user_id = None
+                referred_by_referrer_code = getattr(ref_row, "referrer_code", None)
+                referred_by_created_at = _dt_to_iso(getattr(ref_row, "created_at", None))
+
+                if referred_by_user_id is not None:
+                    referrer_user = (
+                        db.query(Community_User)
+                        .filter(Community_User.id == referred_by_user_id)
+                        .first()
+                    )
+                    referred_by_username = (
+                        str(getattr(referrer_user, "username", None))
+                        if referrer_user is not None
+                        else None
+                    )
+        except Exception:
+            # ignore
+            pass
+
         restrictions_map = _load_restrictions_for_user(db, int(user.id))
 
         # (추가) 작성 글 목록(읽기 전용): 타입별 최근 N개
@@ -5463,6 +5501,11 @@ def community_admin_get_user(
                 "admin_acknowledged": bool(getattr(user, "admin_acknowledged", False)),
                 "referral_code": getattr(user, "referral_code", None),
                 "referral_count": int(referral_count),
+                # (추가) 이 회원을 추천한 사람(추천인)
+                "referred_by_user_id": referred_by_user_id,
+                "referred_by_username": referred_by_username,
+                "referred_by_referrer_code": referred_by_referrer_code,
+                "referred_by_created_at": referred_by_created_at,
                 "posts": {"type1": counts[1], "type3": counts[3], "type4": counts[4]},
             },
             "restrictions": [
