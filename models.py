@@ -117,6 +117,12 @@ class Community_User(Base):
         nullable=False,
         server_default=text("'{}'::text[]"),
     )
+    # --- 2026-02: 맞춤현장 모집(총괄/본부장/팀장/팀원/기타) 필터 ---
+    custom_role_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
     popup_last_seen_at = Column(DateTime(timezone=True), nullable=True)
     last_attendance_date = Column(Date, nullable=True)
     marketing_consent = Column(Boolean, nullable=False, server_default="false")

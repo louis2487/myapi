@@ -69,11 +69,25 @@ CARD1_MAX = 30
 CARD2_MAX = 70
 # 광고글(post_type=4): 카테고리(job_industry)별 목록 개수 제한
 AD_CARD1_MAX = 5  # (=카테고리별 최대 published 개수)
-AD_CATEGORIES: tuple[str, ...] = ("광고", "대출", "급매물", "중고장터")
+AD_PRIMARY_CATEGORY = "광고업체"
+# legacy(하위호환): 기존 DB/앱은 "광고"를 사용했음
+AD_CATEGORY_ALIASES: dict[str, str] = {"광고": AD_PRIMARY_CATEGORY}
+AD_CATEGORIES: tuple[str, ...] = (AD_PRIMARY_CATEGORY, "대출", "급매물", "중고장터")
 
 def _normalize_ad_job_industry(job_industry: str | None) -> str:
     v = (job_industry or "").strip()
-    return v if v in AD_CATEGORIES else "광고"
+    v = AD_CATEGORY_ALIASES.get(v, v)
+    return v if v in AD_CATEGORIES else AD_PRIMARY_CATEGORY
+
+def _ad_category_db_values(cat: str) -> list[str]:
+    """
+    UI/서버 표준 카테고리(cat)를, DB에 남아있는 레거시 값까지 포함한
+    job_industry 필터 목록으로 변환합니다.
+    """
+    if cat == AD_PRIMARY_CATEGORY:
+        # 레거시 "광고" 포함
+        return [AD_PRIMARY_CATEGORY, "광고"]
+    return [cat]
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
     # 등급 달성 보상 포인트(1회성)
@@ -305,15 +319,15 @@ def _rollover_ad_card_types(db: Session) -> None:
     같은 트랜잭션 안에서 호출되어야 합니다.
     """
     for cat in AD_CATEGORIES:
-        # 기존 레거시 데이터(카테고리 누락)는 '광고'로 취급(프론트 list4.tsx의 기본 매핑과 동일)
-        if cat == "광고":
+        # 기존 레거시 데이터(카테고리 누락)는 '광고업체'로 취급(프론트 list4.tsx의 기본 매핑과 동일)
+        if cat == AD_PRIMARY_CATEGORY:
             cat_filter = or_(
-                Community_Post.job_industry == "광고",
+                Community_Post.job_industry.in_(_ad_category_db_values(AD_PRIMARY_CATEGORY)),
                 Community_Post.job_industry.is_(None),
                 Community_Post.job_industry == "",
             )
         else:
-            cat_filter = (Community_Post.job_industry == cat)
+            cat_filter = Community_Post.job_industry.in_(_ad_category_db_values(cat))
 
         while True:
             c1 = (
@@ -367,6 +381,30 @@ def _startup_enforce_recruit_card_limits() -> None:
         print("[WARN] startup recruit card rollover failed:", e)
     finally:
         db.close()
+
+
+@app.on_event("startup")
+def _startup_ensure_community_users_custom_columns() -> None:
+    """
+    운영 편의상 서버 기동 시 '없으면 생성' 형태로 스키마를 보정합니다.
+    - Base.metadata.create_all()은 신규 테이블만 생성하고 컬럼 추가는 하지 않기 때문
+    - 프로젝트는 PostgreSQL(text[])를 사용하므로, postgres 환경에서만 적용합니다.
+    """
+    try:
+        if getattr(engine, "dialect", None) is None:
+            return
+        if engine.dialect.name != "postgresql":
+            return
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE community_users "
+                    "ADD COLUMN IF NOT EXISTS custom_role_codes text[] NOT NULL DEFAULT '{}'::text[];"
+                )
+            )
+    except Exception as e:
+        # 스키마 보정 실패는 치명적이지 않게 경고만 출력
+        print("[WARN] startup schema ensure(custom_role_codes) failed:", e)
 
 # -------------------- TossPayments (SSOT) --------------------
 # clientKey: 결제 페이지(HTML)에서만 사용
@@ -1620,6 +1658,8 @@ class SignupRequest_C(BaseModel):
     marketing_consent: bool = False
     custom_industry_codes: list[str] = Field(default_factory=list)
     custom_region_codes: list[str] = Field(default_factory=list)
+    # 맞춤현장: 모집(총괄/본부장/팀장/팀원/기타)
+    custom_role_codes: list[str] = Field(default_factory=list)
 
 class PhoneSendRequest(BaseModel):
     phone_number: str = Field(min_length=8, max_length=30)
@@ -1887,6 +1927,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         marketing_consent=bool(req.marketing_consent),
         custom_industry_codes=list(req.custom_industry_codes or []),
         custom_region_codes=list(req.custom_region_codes or []),
+        custom_role_codes=list(getattr(req, "custom_role_codes", None) or []),
     )
     db.add(user)
     db.flush()
@@ -2009,9 +2050,9 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    # 회원가입 푸쉬 알림(오너 대상) - 실패해도 회원가입 성공 처리
+    # 회원가입 푸쉬 알림(관리자 대상: admin_acknowledged=True) - 실패해도 회원가입 성공 처리
     try:
-        notify_owners_event(
+        notify_admin_acknowledged_event(
             db,
             title="회원가입 알림",
             body=f"새 회원 가입: {user.username}",
@@ -2022,7 +2063,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             db.rollback()
         except Exception:
             pass
-        print("[WARN] notify_owners_event(signup) failed:", e)
+        print("[WARN] notify_admin_acknowledged_event(signup) failed:", e)
 
     return {
         "status": 0,
@@ -3033,6 +3074,7 @@ def get_user(username: str, db: Session = Depends(get_db)):
             "referral_code": user.referral_code,
             "custom_industry_codes": list(getattr(user, "custom_industry_codes", None) or []),
             "custom_region_codes": list(getattr(user, "custom_region_codes", None) or []),
+            "custom_role_codes": list(getattr(user, "custom_role_codes", None) or []),
             "popup_last_seen_at": popup_last_seen_at_str,
             "last_attendance_date": last_attendance_date_str,
             "marketing_consent": bool(getattr(user, "marketing_consent", False)),
@@ -3052,6 +3094,7 @@ class UserUpdateRequest(BaseModel):
     marketing_consent: bool | None = None
     custom_industry_codes: list[str] | None = None
     custom_region_codes: list[str] | None = None
+    custom_role_codes: list[str] | None = None
 
 @app.put("/community/user/{username}")
 def update_user(
@@ -3140,6 +3183,9 @@ def update_user(
     if req.custom_region_codes is not None:
         user.custom_region_codes = list(req.custom_region_codes or [])
 
+    if getattr(req, "custom_role_codes", None) is not None:
+        user.custom_role_codes = list(req.custom_role_codes or [])
+
     db.commit()
     db.refresh(user)
 
@@ -3161,9 +3207,9 @@ def delete_user(username: str, db: Session = Depends(get_db)):
     db.delete(user)
     db.commit()
 
-    # 회원 탈퇴 푸쉬 알림(오너 대상) - 실패해도 탈퇴 성공 처리
+    # 회원 탈퇴 푸쉬 알림(관리자 대상: admin_acknowledged=True) - 실패해도 탈퇴 성공 처리
     try:
-        notify_owners_event(
+        notify_admin_acknowledged_event(
             db,
             title="회원탈퇴 알림",
             body=f"회원 탈퇴: {deleted_username}",
@@ -3174,7 +3220,7 @@ def delete_user(username: str, db: Session = Depends(get_db)):
             db.rollback()
         except Exception:
             pass
-        print("[WARN] notify_owners_event(withdraw) failed:", e)
+        print("[WARN] notify_admin_acknowledged_event(withdraw) failed:", e)
 
     return {"status": 0}
 
@@ -4171,6 +4217,29 @@ def list_posts_custom_by_user_settings(
 
         if conds:
             q = q.filter(or_(*conds))
+
+    # --- 모집(역할) 필터 ---
+    # 저장 값(대표 5종):
+    # - "총괄" => total_use
+    # - "본부장" => branch_use(본부장) OR hq_use(본부)
+    # - "팀장" => leader_use(팀장) OR team_use(팀)
+    # - "팀원" => member_use(팀원) OR each_use(각개)
+    # - "기타" => other_role_name 존재
+    roles = [str(x).strip() for x in (getattr(user, "custom_role_codes", None) or []) if str(x).strip()]
+    if roles:
+        role_conds = []
+        if "총괄" in roles:
+            role_conds.append(Community_Post.total_use.is_(True))
+        if "본부장" in roles:
+            role_conds.append(or_(Community_Post.branch_use.is_(True), Community_Post.hq_use.is_(True)))
+        if "팀장" in roles:
+            role_conds.append(or_(Community_Post.leader_use.is_(True), Community_Post.team_use.is_(True)))
+        if "팀원" in roles:
+            role_conds.append(or_(Community_Post.member_use.is_(True), Community_Post.each_use.is_(True)))
+        if "기타" in roles:
+            role_conds.append(and_(Community_Post.other_role_name.isnot(None), Community_Post.other_role_name != ""))
+        if role_conds:
+            q = q.filter(or_(*role_conds))
 
     if cursor:
         try:
@@ -5403,6 +5472,33 @@ def community_admin_get_user(
             or 0
         )
 
+        # (추가) 해당 회원이 "추천한" 대상 목록(referral 참조)
+        # - referred_user의 username + referral_code 까지 함께 반환(관리자 열람 화면용)
+        try:
+            referred_rows = (
+                db.query(
+                    Referral,
+                    Community_User.username.label("referred_username"),
+                    Community_User.referral_code.label("referred_referral_code"),
+                )
+                .join(Community_User, Community_User.id == Referral.referred_user_id)
+                .filter(Referral.referrer_user_id == user.id)
+                .order_by(Referral.created_at.desc().nullslast(), Referral.id.desc())
+                .limit(200)
+                .all()
+            )
+            referred_items = [
+                {
+                    "id": int(r.Referral.id),
+                    "referred_username": str(r.referred_username or ""),
+                    "referred_referral_code": r.referred_referral_code,
+                    "created_at": _dt_to_iso(getattr(r.Referral, "created_at", None)),
+                }
+                for r in referred_rows
+            ]
+        except Exception:
+            referred_items = []
+
         restrictions_map = _load_restrictions_for_user(db, int(user.id))
 
         # (추가) 작성 글 목록(읽기 전용): 타입별 최근 N개
@@ -5441,6 +5537,8 @@ def community_admin_get_user(
                 {"post_type": 3, "restricted_until": _dt_to_iso(restrictions_map[3])},
                 {"post_type": 4, "restricted_until": _dt_to_iso(restrictions_map[4])},
             ],
+            # 추천(추가): 이 회원이 추천한 대상 목록
+            "referred_items": referred_items,
             "post_items": {
                 "type1": _list_posts_by_type(1, 20),
                 "type3": _list_posts_by_type(3, 20),
@@ -6162,6 +6260,43 @@ def notify_owners_event(db: Session, title: str, body: str, data: dict | None = 
 
         try:
             token = getattr(o, "push_token", None)
+            if token:
+                send_push(token, title, body, payload)
+        except Exception:
+            pass
+
+
+def notify_admin_acknowledged_event(db: Session, title: str, body: str, data: dict | None = None):
+    """
+    회원가입/탈퇴 등 시스템 이벤트를 관리자(admin_acknowledged=True)에게 푸쉬 + 미확인 알림 저장.
+    - 요구사항(2026-02-06): is_owner가 아닌 admin_acknowledged=True 기준으로 알림 대상 선정
+    """
+    admins = (
+        db.query(Community_User)
+        .filter(Community_User.admin_acknowledged.is_(True))
+        .all()
+    )
+    payload = data or {}
+    for a in admins:
+        try:
+            create_notification(
+                db,
+                user_id=int(a.id),
+                title=title,
+                body=body,
+                type="system",
+                data=payload,
+                commit=True,
+            )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+
+        try:
+            token = getattr(a, "push_token", None)
             if token:
                 send_push(token, title, body, payload)
         except Exception:
