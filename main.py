@@ -67,9 +67,9 @@ KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKA
 CARD1_MAX = 30
 # 광고글(post_type=4): 카테고리(job_industry)별 목록 개수 제한
 AD_CARD1_MAX = 5  # (=카테고리별 최대 published 개수)
-AD_PRIMARY_CATEGORY = "광고업체"
-# legacy(하위호환): 기존 DB/앱은 "광고"를 사용했음
-AD_CATEGORY_ALIASES: dict[str, str] = {"광고": AD_PRIMARY_CATEGORY}
+AD_PRIMARY_CATEGORY = "광고"
+# legacy(하위호환): 기존 DB/앱은 "광고업체"를 사용했음
+AD_CATEGORY_ALIASES: dict[str, str] = {"광고업체": AD_PRIMARY_CATEGORY}
 AD_CATEGORIES: tuple[str, ...] = (AD_PRIMARY_CATEGORY, "대출", "급매물", "중고장터")
 
 def _normalize_ad_job_industry(job_industry: str | None) -> str:
@@ -83,8 +83,8 @@ def _ad_category_db_values(cat: str) -> list[str]:
     job_industry 필터 목록으로 변환합니다.
     """
     if cat == AD_PRIMARY_CATEGORY:
-        # 레거시 "광고" 포함
-        return [AD_PRIMARY_CATEGORY, "광고"]
+        # 레거시 "광고업체" 포함
+        return [AD_PRIMARY_CATEGORY, "광고업체"]
     return [cat]
 
 GRADE_REWARD_BY_GRADE: dict[int, int] = {
@@ -252,7 +252,7 @@ def _rollover_ad_card_types(db: Session) -> None:
     같은 트랜잭션 안에서 호출되어야 합니다.
     """
     for cat in AD_CATEGORIES:
-        # 기존 레거시 데이터(카테고리 누락)는 '광고업체'로 취급(프론트 list4.tsx의 기본 매핑과 동일)
+        # 기존 레거시 데이터(카테고리 누락)는 '광고'로 취급(프론트 list4.tsx의 기본 매핑과 동일)
         if cat == AD_PRIMARY_CATEGORY:
             cat_filter = or_(
                 Community_Post.job_industry.in_(_ad_category_db_values(AD_PRIMARY_CATEGORY)),
