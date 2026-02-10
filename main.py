@@ -1591,6 +1591,8 @@ class SignupRequest_C(BaseModel):
     marketing_consent: bool = False
     custom_industry_codes: list[str] = Field(default_factory=list)
     custom_region_codes: list[str] = Field(default_factory=list)
+    # 지역현장: 선호지역(세부지역 포함)
+    area_region_codes: list[str] = Field(default_factory=list)
     # 맞춤현장: 모집(총괄/본부장/팀장/팀원/기타)
     custom_role_codes: list[str] = Field(default_factory=list)
 
@@ -1860,6 +1862,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         marketing_consent=bool(req.marketing_consent),
         custom_industry_codes=list(req.custom_industry_codes or []),
         custom_region_codes=list(req.custom_region_codes or []),
+        area_region_codes=list(getattr(req, "area_region_codes", None) or []),
         custom_role_codes=list(getattr(req, "custom_role_codes", None) or []),
     )
     db.add(user)
@@ -3007,6 +3010,7 @@ def get_user(username: str, db: Session = Depends(get_db)):
             "referral_code": user.referral_code,
             "custom_industry_codes": list(getattr(user, "custom_industry_codes", None) or []),
             "custom_region_codes": list(getattr(user, "custom_region_codes", None) or []),
+            "area_region_codes": list(getattr(user, "area_region_codes", None) or []),
             "custom_role_codes": list(getattr(user, "custom_role_codes", None) or []),
             "popup_last_seen_at": popup_last_seen_at_str,
             "last_attendance_date": last_attendance_date_str,
@@ -3027,6 +3031,7 @@ class UserUpdateRequest(BaseModel):
     marketing_consent: bool | None = None
     custom_industry_codes: list[str] | None = None
     custom_region_codes: list[str] | None = None
+    area_region_codes: list[str] | None = None
     custom_role_codes: list[str] | None = None
 
 @app.put("/community/user/{username}")
@@ -3115,6 +3120,9 @@ def update_user(
 
     if req.custom_region_codes is not None:
         user.custom_region_codes = list(req.custom_region_codes or [])
+
+    if getattr(req, "area_region_codes", None) is not None:
+        user.area_region_codes = list(req.area_region_codes or [])
 
     if getattr(req, "custom_role_codes", None) is not None:
         user.custom_role_codes = list(req.custom_role_codes or [])

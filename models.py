@@ -117,6 +117,12 @@ class Community_User(Base):
         nullable=False,
         server_default=text("'{}'::text[]"),
     )
+    # --- 2026-02: 지역현장(선호지역) 필터 ---
+    area_region_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
     # --- 2026-02: 맞춤현장 모집(총괄/본부장/팀장/팀원/기타) 필터 ---
     custom_role_codes = Column(
         ARRAY(Text),
