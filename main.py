@@ -3750,10 +3750,7 @@ def create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
         card_type= card_type,
     )
    
-    # ---- 구인글 작성 보상: 1000포인트 지급 + 마지막 작성 시각 갱신 ----
-    if not is_admin_ack:
-        user.point_balance = int(user.point_balance or 0) + 1000
-        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+    # ---- 구인글 작성 시각 갱신(하루 1회 제한/통계용) ----
     user.last_recruit_posted_at = now_utc
 
     db.add(post)
@@ -3869,7 +3866,7 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
     if not (int(post_type) == 1 and is_admin_ack):
         _enforce_user_post_restriction(db, int(userId), int(post_type))
 
-    # post_type == 1 (구인글): 하루 1회 제한 + 포인트 지급
+    # post_type == 1 (구인글): 하루 1회 제한
     if int(post_type) == 1:
         now_utc = datetime.now(timezone.utc)
         if not is_admin_ack:
@@ -3890,11 +3887,8 @@ def create_post_plus(post_type:int, username: str, body: PostCreate, db: Session
         # 구인글(post_type=1): 캐시 차감 없이 1유형으로 고정
         card_type = 1
 
-        # 보상/작성시각 갱신
+        # 작성시각 갱신
         user.last_recruit_posted_at = now_utc
-        if not is_admin_ack:
-            user.point_balance = int(user.point_balance or 0) + 1000
-            db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
     else:
         # 광고글(post_type=4): card_type은 항상 1로 고정(프론트 정책과 일치)
         if int(post_type) == 4:
@@ -4857,10 +4851,7 @@ def recreate_recruit_post(
         card_type=1,
     )
 
-    # ---- 구인글 작성 보상: 1000포인트 지급 + 마지막 작성 시각 갱신 ----
-    if not is_admin_ack:
-        user.point_balance = int(getattr(user, "point_balance", 0) or 0) + 1000
-        db.add(Point(user_id=userId, reason="recruit_post", amount=1000))
+    # ---- 구인글 작성 시각 갱신(하루 1회 제한/통계용) ----
     user.last_recruit_posted_at = now_utc
 
     db.add(post)
