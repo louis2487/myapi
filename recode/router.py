@@ -350,9 +350,34 @@ def recode_patch(
     recode_id: int,
     payload: RecodePatchIn,
     db: Session = Depends(get_db),
-    user: User = Depends(current_user),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
-    r = db.query(Recode).filter(Recode.id == recode_id, Recode.user_id == user.id).first()
+    # 인증/식별:
+    # - (권장) Authorization: Bearer <JWT(sub=users.id)>
+    # - (하위호환) payload.username
+    user = try_get_current_user(db, authorization)
+    username = (
+        (user.username if user else None) or (payload.username or "").strip() or None
+    )
+    if not username:
+        raise HTTPException(status_code=401, detail="username or Authorization required")
+
+    q = db.query(Recode).filter(Recode.id == recode_id)
+    if user:
+        # user_id 기반(신규) + username 기반(레거시) 모두 허용
+        q = q.filter(or_(Recode.user_id == user.id, Recode.username == user.username))
+    else:
+        # username만 왔을 때도 user_id 매핑된 신규 데이터가 있을 수 있어 함께 조회
+        uid = None
+        u = db.query(User).filter(User.username == username).first()
+        if u:
+            uid = u.id
+        conds = [Recode.username == username]
+        if uid is not None:
+            conds.append(Recode.user_id == uid)
+        q = q.filter(or_(*conds))
+
+    r = q.first()
     if not r:
         raise HTTPException(status_code=404, detail="recode not found")
     if payload.trip_purpose is not None:

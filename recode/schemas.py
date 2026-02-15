@@ -108,6 +108,9 @@ class RecodeEndIn(BaseModel):
 
 
 class RecodePatchIn(BaseModel):
+    # 하위호환/토큰 없는 수정 저장을 위한 식별값
+    # - Authorization 헤더가 없거나 만료된 경우 username 기반으로 소유자를 확인합니다.
+    username: str | None = None
     trip_purpose: str | None = None
     business_use: bool | None = None
 
