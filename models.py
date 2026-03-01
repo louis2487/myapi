@@ -1,0 +1,454 @@
+from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text, SmallInteger, Numeric
+from sqlalchemy.ext.declarative import declarative_base
+from datetime import datetime, date
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, ARRAY
+from sqlalchemy.dialects.postgresql import UUID
+import uuid as _uuid
+Base = declarative_base()
+
+class RuntimeRecord(Base):
+    __tablename__ = "time"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True,unique=True)
+    runtime_seconds = Column(Integer)
+
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id   =  Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), nullable=False, unique=True, index=True) 
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    
+    subscriptions = relationship("Subscription", back_populates="user")
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(Text, nullable=False)
+    purchase_token = Column(Text, nullable=False)
+    order_id = Column(Text, nullable=True)
+    subscribed_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    auto_renewing = Column(Boolean, nullable=False, default=True)
+    status = Column(Text, nullable=False)  
+    last_verified_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now, onupdate=datetime.now)
+    active = Column(Boolean, nullable=False, default=False)
+
+    user = relationship("User", back_populates="subscriptions")
+
+class Recode(Base):
+    __tablename__ = "recode"
+    id = Column(Integer, primary_key=True, index=True)
+    # legacy(하위호환): 기존 앱은 username 기반으로 동작
+    username = Column(String, index=True, nullable=True)
+
+    # 신규(스펙): user_id 기반 (users.id)
+    user_id = Column(Integer, index=True, nullable=True)
+
+    date = Column(String(20), index=True)  # YYYY-MM-DD
+    ontime = Column(String(10))  # HH:MM[:SS]
+    offtime = Column(String(10))  # HH:MM[:SS]
+
+    # legacy: 기존 앱은 초(second) 단위로 duration을 보냄
+    duration = Column(Integer)
+    # 신규 스펙: 분(minute) 단위 duration (옵션; 기존 데이터/클라이언트와 공존)
+    duration_minutes = Column(Integer, nullable=True)
+
+    # GPS/사용자 입력(스펙)
+    start_location = Column(Text, nullable=True)
+    end_location = Column(Text, nullable=True)
+    trip_km = Column(Numeric(10, 2), nullable=True)
+    trip_purpose = Column(Text, nullable=True)
+    business_use = Column(Boolean, nullable=False, server_default="false")
+
+#---------------smart-research-app-----------------------------------------------------------
+class ResearchQuestion(Base):
+    __tablename__ = "research_questions"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    title = Column(Text, nullable=True)
+    query = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, server_default="true", index=True)
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+
+class ResearchReport(Base):
+    __tablename__ = "research_reports"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    question_id = Column(BigInteger, nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    status = Column(Text, nullable=False, server_default="created", index=True)
+    error = Column(Text, nullable=True)
+
+    sections = Column(JSON, nullable=True)
+    pdf_path = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("question_id", "run_date", name="uq_research_reports_question_date"),
+        Index("ix_research_reports_question_date", "question_id", "run_date"),
+    )
+
+
+class RangeSummaryOut(BaseModel):
+    username: str
+    start: str
+    end: str
+    on_count: int
+    runtime_seconds: int
+
+class PurchaseVerifyIn(BaseModel):
+    username: str 
+    product_id: str
+    purchase_token: str
+
+class SubscriptionStatusOut(BaseModel):
+    active: bool
+    product_id: str | None = None
+    expires_at: datetime | None = None
+    status: str | None = None
+    auto_renewing: bool | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+#---------------community-app-mvp-----------------------------------------------------------
+
+class Community_User(Base):
+    __tablename__ = "community_users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    name          = Column(String(50),  nullable=True)
+    phone_number  = Column(String(20),  nullable=True)  
+    region        = Column(String(100), nullable=True)
+    signup_date = Column(Date, nullable=True, default=date.today)
+    push_token = Column(String(255), nullable=True)
+    point_balance = Column(BigInteger, nullable=False, server_default="0")
+    cash_balance = Column(BigInteger, nullable=False, server_default="0")
+    admin_acknowledged = Column(Boolean, nullable=False, server_default="false")
+    referral_code = Column(String(20), nullable=True)
+    # --- 2026-01: community_users 신규 필드(서버/앱 연동용) ---
+    custom_industry_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    custom_region_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    # --- 2026-02: 지역현장(선호지역) 필터 ---
+    area_region_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    # --- 2026-02: 맞춤현장 모집(총괄/본부장/팀장/팀원/기타) 필터 ---
+    custom_role_codes = Column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'::text[]"),
+    )
+    popup_last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_attendance_date = Column(Date, nullable=True)
+    marketing_consent = Column(Boolean, nullable=False, server_default="false")
+
+    # --- 2026-01: 커뮤니티 운영/구인글 기능용 신규 필드 ---
+    # 마지막 구인글 작성 시각 (nullable)
+    last_recruit_posted_at = Column(DateTime(timezone=True), nullable=True)
+    # 유저 등급(0=기본) / NOT NULL DEFAULT 0
+    user_grade = Column(SmallInteger, nullable=False, server_default="0")
+    # 사업주 여부 / NOT NULL DEFAULT false
+    is_owner = Column(Boolean, nullable=False, server_default="false")
+
+    __table_args__ = (
+        Index("ix_community_users_is_owner", "is_owner"),
+        Index("ix_community_users_user_grade", "user_grade"),
+    )
+
+class Community_UI_Config(Base):
+    """
+    앱 UI 설정(배너/팝업 등) 1행 저장 테이블.
+    - 운영 편의상 JSON으로 유연하게 저장합니다.
+    - 단일 row(id=1)만 사용합니다.
+    """
+    __tablename__ = "community_ui_config"
+
+    id = Column(SmallInteger, primary_key=True, index=True)
+    config = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
+
+class Community_User_Restriction(Base):
+    """
+    커뮤니티 유저 글 작성 제재(타입별 제한).
+    - 유니크: (user_id, post_type) 1행 유지(업서트로 갱신/해제)
+    - FK는 강제하지 않음(프로젝트 정책: 제약조건 최소화)
+    """
+    __tablename__ = "community_user_restrictions"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    post_type = Column(SmallInteger, nullable=False, index=True)  # 1|3|4
+    restricted_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_by_user_id = Column(Integer, nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "post_type", name="uq_community_user_restrictions_user_post_type"),
+        Index("ix_community_user_restrictions_user_post_type", "user_id", "post_type"),
+    )
+
+class Community_Phone_Verification(Base):
+    """
+    커뮤니티 회원가입 휴대폰 인증번호 발송/검증 이력.
+    - 회원가입 단계에서만 사용 (phone_number + verified_at으로 검증)
+    """
+    __tablename__ = "community_phone_verifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    phone_number = Column(String(20), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    attempts = Column(Integer, nullable=False, server_default="0")
+
+class Phone(Base):
+    """
+    휴대폰 번호 영구 저장(추천인 시스템 남용 방지용 SSOT).
+    - 요구사항: create table if not exists phone (id bigserial pk, phone text not null, created_at timestamptz default now())
+    - 제약조건(UNIQUE)은 두지 않음(요구사항 기준). 앱 로직에서 중복 삽입을 방지합니다.
+    """
+    __tablename__ = "phone"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    phone = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_phone_phone", "phone"),
+    )
+
+class Community_Post(Base):
+    __tablename__ = "community_posts"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+    image_url = Column(String(512))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    contract_fee = Column(String(255))               
+    workplace_address = Column(String(255))          
+    workplace_map_url = Column(String(512))   
+    workplace_lat= Column(DOUBLE_PRECISION, nullable=True)   
+    workplace_lng= Column(DOUBLE_PRECISION, nullable=True)   
+    business_lat= Column(DOUBLE_PRECISION, nullable=True)   
+    business_lng= Column(DOUBLE_PRECISION, nullable=True)          
+    business_address = Column(String(255))           
+    business_map_url = Column(String(512))            
+    job_industry = Column(String(100))               
+    job_category = Column(String(100))                
+    pay_support = Column(Boolean)                      
+    meal_support = Column(Boolean)                   
+    house_support = Column(Boolean)               
+    company_developer = Column(String(255))            
+    company_constructor = Column(String(255))       
+    company_trustee = Column(String(255))              
+    company_agency = Column(String(255))          
+    agency_call = Column(String(50))
+    province = Column(String(50), nullable=True)   
+    city     = Column(String(50), nullable=True)
+    status = Column(String(20), nullable=False, default="published")
+    highlight_color = Column(String(255))
+    highlight_content = Column(String(255))
+    total_use = Column(Boolean) 
+    branch_use =Column(Boolean) 
+    # 신규 모집 항목: 본부
+    hq_use = Column(Boolean)
+    leader_use = Column(Boolean) 
+    member_use =Column(Boolean)
+    # 신규 모집 항목: 팀/각개
+    team_use = Column(Boolean)
+    each_use = Column(Boolean)
+    total_fee = Column(String(255)) 
+    branch_fee = Column(String(255))  
+    hq_fee = Column(String(255))
+    leader_fee = Column(String(255))  
+    member_fee = Column(String(255))
+    team_fee = Column(String(255))
+    each_fee = Column(String(255))
+    pay_use = Column(Boolean)  
+    meal_use = Column(Boolean)                   
+    house_use = Column(Boolean)
+    pay_sup = Column(String(255)) 
+    meal_sup = Column(Boolean)                   
+    house_sup  = Column(String(255))
+    item1_use = Column(Boolean)  
+    item1_type = Column(String(255))
+    item1_sup = Column(String(255)) 
+    item2_use = Column(Boolean)  
+    item2_type = Column(String(255))
+    item2_sup = Column(String(255))
+    item3_use = Column(Boolean)     
+    item3_type = Column(String(255))
+    item3_sup = Column(String(255)) 
+    item4_use = Column(Boolean)  
+    item4_type = Column(String(255))
+    item4_sup = Column(String(255)) 
+    agent = Column(String(255))
+    # 모집(기타) 항목: 표시용 이름/수수료(텍스트 허용)
+    other_role_name = Column(String(255))
+    other_role_fee = Column(String(255))
+    post_type= Column(DOUBLE_PRECISION, nullable=True)   
+    card_type= Column(DOUBLE_PRECISION, nullable=True)                 
+
+    author = relationship("Community_User", foreign_keys=[user_id], lazy="joined")
+    comments = relationship("Community_Comment", back_populates="post", cascade="all, delete-orphan")
+
+class Community_Comment(Base):
+    __tablename__ = "community_comments"
+    id = Column(BigInteger, primary_key=True, index=True)  
+    post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    username = Column(String(50), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    parent_id = Column(BigInteger, ForeignKey("community_comments.id", ondelete="CASCADE"), nullable=True, index=True)
+    is_deleted = Column(Boolean, nullable=False, server_default="false")
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    post = relationship("Community_Post", back_populates="comments", lazy="joined")
+    user = relationship("Community_User", lazy="joined")
+
+
+class Post_Like(Base):
+    __tablename__ = "post_likes"
+
+    username = Column(String(50), ForeignKey("community_users.username"), primary_key=True)
+    post_id = Column(Integer, ForeignKey("community_posts.id"), primary_key=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_post_likes_user_created", "username", "created_at"),
+        Index("ix_post_likes_post", "post_id"),
+    )
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("community_users.id", ondelete="CASCADE"), nullable=False)
+    user = relationship("Community_User")  
+
+    type = Column(String(50), nullable=True)            
+    title = Column(Text, nullable=True)
+    body = Column(Text, nullable=True)
+
+    data = Column(JSON, nullable=True)                  
+
+    is_read = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Referral(Base):
+    """
+    커뮤니티 추천(추천인/피추천인) 이벤트 테이블.
+    - 사용자 요청: FK/UNIQUE 등 제약조건 제거 (DB에서 강제하지 않음)
+    """
+    __tablename__ = "referral"
+
+    # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    referrer_user_id = Column(BigInteger, nullable=False, index=True)
+    referred_user_id = Column(BigInteger, nullable=False, index=True)
+    referrer_code = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_referral_events_referrer", "referrer_user_id", "created_at"),
+    )
+
+
+class Point(Base):
+    """
+    포인트 원장(적립/사용 내역) 테이블.
+    - 사용자 요청: FK 등 제약조건 제거 (DB에서 강제하지 않음)
+    """
+    __tablename__ = "point"
+
+    # PostgreSQL BIGSERIAL과 호환되도록 autoincrement 보장
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    reason = Column(String(50), nullable=False)
+    amount = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_point_ledger_user_time", "user_id", "created_at"),
+    )
+
+
+class Cash(Base):
+    """
+    캐시 원장(충전/사용 내역) 테이블.
+    - 사용자 요청: FK 등 제약조건 제거 (DB에서 강제하지 않음)
+    """
+    __tablename__ = "cash"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    reason = Column(String(50), nullable=False)
+    amount = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_cash_ledger_user_time", "user_id", "created_at"),
+    )
+
+
+class Payment(Base):
+    """
+    TossPayments 결제 상태 저장 (orders/payments SSOT).
+    DB 스키마는 사용자가 제공한 payments 테이블을 기준으로 매핑합니다.
+    """
+    __tablename__ = "payments"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    order_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True, default=_uuid.uuid4)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    amount = Column(BigInteger, nullable=False)
+    status = Column(String(20), nullable=False)  # PENDING | PAID | FAILED | CANCELED
+
+    payment_key = Column(String(200), nullable=True, unique=True, index=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
