@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from models import Community_User, Notification
@@ -32,6 +33,7 @@ def notify_admin_acknowledged_post(
     author_username: str,
     post_title: str,
     exclude_user_id: int | None = None,
+    include_owners: bool = False,
 ):
     """
     구인/수다/광고 글 등록 시 관리자(admin_acknowledged=True)에게 푸쉬 + 미확인 알림 저장.
@@ -52,9 +54,26 @@ def notify_admin_acknowledged_post(
     body = f"{author_username}님이 새로운 {label}을 작성했습니다: {post_title}"
     data = {"post_id": int(post_id), "post_type": int(pt)}
 
-    admins = db.query(Community_User).filter(Community_User.admin_acknowledged.is_(True)).all()
+    if include_owners:
+        targets = (
+            db.query(Community_User)
+            .filter(or_(Community_User.admin_acknowledged.is_(True), Community_User.is_owner.is_(True)))
+            .all()
+        )
+    else:
+        targets = db.query(Community_User).filter(Community_User.admin_acknowledged.is_(True)).all()
 
-    for a in admins:
+    # 중복 대상 제거(예: owner이면서 admin_acknowledged인 경우)
+    uniq: dict[int, Community_User] = {}
+    for u in targets:
+        try:
+            uid = int(getattr(u, "id", 0) or 0)
+        except Exception:
+            continue
+        if uid:
+            uniq[uid] = u
+
+    for a in uniq.values():
         if exclude_user_id is not None and int(getattr(a, "id", 0) or 0) == int(exclude_user_id):
             continue
         try:

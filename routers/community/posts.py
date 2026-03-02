@@ -789,6 +789,8 @@ def create_post_plus(post_type: int, username: str, body: PostCreate, db: Sessio
                 author_username=username,
                 post_title=post.title,
                 exclude_user_id=int(userId),
+                # 문의글(post_type=6)은 owner도 함께 수신하도록 확장(관리자 기준 보완)
+                include_owners=(int(post_type) == 6),
             )
         elif int(post_type) == 5:
             notify_all_push_post(
