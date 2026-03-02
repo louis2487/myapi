@@ -163,6 +163,8 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
         db.add(Phone(phone=digits))
 
     SIGNUP_BONUS = 500
+    REFERRAL_BONUS_REFERRED = 1000 # - 타인의 의해 추천받은 회원
+    REFERRAL_BONUS_REFERRER = 5000  # - 추천하고 가입한 회원
     signup_bonus_amount = 0
     referral_bonus_referred_amount = 0
     referral_bonus_referrer_amount = 0
@@ -171,7 +173,7 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
 
     # 정책:
     # - 추천인코드 미기입 시에만 가입 포인트 500P 지급
-    # - 추천인코드 기입 + (phone 테이블에 없는 번호)일 때만 추천인 시스템(각 1000P) 적용
+    # - 추천인코드 기입 + (phone 테이블에 없는 번호)일 때만 추천인 시스템(추천인 5000P / 피추천인 1000P) 적용
     # - 추천인코드 기입했더라도, phone 테이블에 이미 저장된 번호면 추천인 시스템은 "완전 미적용"(코드 검증/포인트/원장/알림 모두 스킵)
     if not input_code:
         signup_bonus_amount = SIGNUP_BONUS
@@ -200,21 +202,34 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
             )
             db.flush()  # 아래 추천인 수 집계에 방금 추가한 Referral이 포함되도록
 
-            bonus = 1000
-            referral_bonus_referred_amount = bonus
-            referral_bonus_referrer_amount = bonus
+            referred_bonus = int(REFERRAL_BONUS_REFERRED)
+            referrer_bonus = int(REFERRAL_BONUS_REFERRER)
+            referral_bonus_referred_amount = referred_bonus
+            referral_bonus_referrer_amount = referrer_bonus
 
             # 추천인 포인트 적립
-            referrer.point_balance = int(referrer.point_balance or 0) + bonus
-            db.add(Point(user_id=referrer.id, reason="referral_bonus_referrer", amount=bonus))
+            referrer.point_balance = int(referrer.point_balance or 0) + referrer_bonus
+            db.add(
+                Point(
+                    user_id=referrer.id,
+                    reason="referral_bonus_referrer",
+                    amount=referrer_bonus,
+                )
+            )
 
             # --- 추천인 수 기반 자동 등급 동기화(등급 상승 시 보상 지급) ---
             ref_cnt = db.query(func.count(Referral.id)).filter(Referral.referrer_user_id == referrer.id).scalar() or 0
             _apply_user_grade_upgrade(db, referrer, int(ref_cnt))
 
             # 피추천인 포인트 적립
-            user.point_balance = int(user.point_balance or 0) + bonus
-            db.add(Point(user_id=user.id, reason="referral_bonus_referred", amount=bonus))
+            user.point_balance = int(user.point_balance or 0) + referred_bonus
+            db.add(
+                Point(
+                    user_id=user.id,
+                    reason="referral_bonus_referred",
+                    amount=referred_bonus,
+                )
+            )
 
             # 추천인에게 "미확인 알림" 누적(앱 실행 시 Alert로 보여주기 위함)
             db.add(
@@ -222,10 +237,10 @@ def community_signup(req: SignupRequest_C, db: Session = Depends(get_db)):
                     user_id=int(referrer.id),
                     type="referral",
                     title="추천인 가입 포인트 지급",
-                    body=f"{user.username}님이 추천인코드로 가입하여 {bonus}점이 지급되었습니다.",
+                    body=f"{user.username}님이 추천인코드로 가입하여 {referrer_bonus}점이 지급되었습니다.",
                     data={
                         "referred_username": user.username,
-                        "amount": bonus,
+                        "amount": referrer_bonus,
                         "reason": "referral_bonus_referrer",
                     },
                     is_read=False,

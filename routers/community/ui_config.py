@@ -25,7 +25,7 @@ class UIConfigBannerItem(BaseModel):
     # px(dp) based width (preferred; if set, client can render fixed width)
     width_px: int | None = Field(default=None, ge=120, le=1200)
     height: int | None = Field(default=None, ge=60, le=260)
-    resize_mode: Literal["contain", "cover"] | None = None
+    resize_mode: Literal["contain", "cover", "stretch"] | None = None
 
 
 class UIConfigBanner(BaseModel):
@@ -33,7 +33,7 @@ class UIConfigBanner(BaseModel):
     interval_posts: int = Field(default=10, ge=1, le=200)
     items: List[UIConfigBannerItem] = Field(default_factory=list)
     height: int = Field(default=110, ge=60, le=260)
-    resize_mode: Literal["contain", "cover"] = "contain"
+    resize_mode: Literal["contain", "cover", "stretch"] = "contain"
 
 
 class UIConfigTopBanner(BaseModel):
@@ -41,7 +41,7 @@ class UIConfigTopBanner(BaseModel):
     # 첫화면 상단 배너는 2개 슬롯만 사용
     items: List[UIConfigBannerItem] = Field(default_factory=list)
     height: int = Field(default=70, ge=60, le=260)
-    resize_mode: Literal["contain", "cover"] = "contain"
+    resize_mode: Literal["contain", "cover", "stretch"] = "contain"
 
 
 class UIConfigPopup(BaseModel):
@@ -50,7 +50,7 @@ class UIConfigPopup(BaseModel):
     link_url: str | None = Field(default=None, max_length=1024)
     width_percent: int = Field(default=92, ge=40, le=100)
     height: int = Field(default=360, ge=200, le=900)
-    resize_mode: Literal["contain", "cover"] = "contain"
+    resize_mode: Literal["contain", "cover", "stretch"] = "contain"
 
 
 class UIConfigPayload(BaseModel):
@@ -115,7 +115,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
 
     rm = banner.get("resize_mode", base["banner"]["resize_mode"])
     rm_s = str(rm).strip().lower() if isinstance(rm, str) else "contain"
-    base["banner"]["resize_mode"] = rm_s if rm_s in ("contain", "cover") else "contain"
+    base["banner"]["resize_mode"] = rm_s if rm_s in ("contain", "cover", "stretch") else "contain"
 
     items = banner.get("items")
     norm_items: list[dict] = []
@@ -167,7 +167,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
 
             irm = it.get("resize_mode", base["banner"]["resize_mode"])
             irm_s = str(irm).strip().lower() if isinstance(irm, str) else str(base["banner"]["resize_mode"])
-            irm_s = irm_s if irm_s in ("contain", "cover") else "contain"
+            irm_s = irm_s if irm_s in ("contain", "cover", "stretch") else "contain"
 
             norm_items.append(
                 {
@@ -197,7 +197,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
 
     trm = top_banner.get("resize_mode", base["top_banner"]["resize_mode"])
     trm_s = str(trm).strip().lower() if isinstance(trm, str) else "contain"
-    base["top_banner"]["resize_mode"] = trm_s if trm_s in ("contain", "cover") else "contain"
+    base["top_banner"]["resize_mode"] = trm_s if trm_s in ("contain", "cover", "stretch") else "contain"
 
     top_items = top_banner.get("items")
     norm_top_items: list[dict] = []
@@ -247,7 +247,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
 
             irm = it.get("resize_mode", base["top_banner"]["resize_mode"])
             irm_s = str(irm).strip().lower() if isinstance(irm, str) else str(base["top_banner"]["resize_mode"])
-            irm_s = irm_s if irm_s in ("contain", "cover") else "contain"
+            irm_s = irm_s if irm_s in ("contain", "cover", "stretch") else "contain"
 
             norm_top_items.append(
                 {
@@ -289,7 +289,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
 
     prm = popup.get("resize_mode", base["popup"]["resize_mode"])
     prm_s = str(prm).strip().lower() if isinstance(prm, str) else "contain"
-    base["popup"]["resize_mode"] = prm_s if prm_s in ("contain", "cover") else "contain"
+    base["popup"]["resize_mode"] = prm_s if prm_s in ("contain", "cover", "stretch") else "contain"
     return base
 
 
