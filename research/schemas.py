@@ -50,6 +50,10 @@ class ResearchRunIn(BaseModel):
     force: bool = False
 
 
+class ResearchReportRunOut(ResearchReportOut):
+    error: str | None = None
+
+
 class ResearchRunOut(BaseModel):
-    reports: list[ResearchReportOut]
+    reports: list[ResearchReportRunOut]
 
