@@ -28,14 +28,38 @@ def _seoul_today() -> date:
 
 
 def _openai_key() -> str:
-    key = (os.getenv("GPT_API_key") or "").strip()
+    # 배포/로컬 환경마다 키 변수명이 달라지는 경우가 있어 여러 후보를 허용합니다.
+    key = (
+        os.getenv("OPENAI_API_KEY")
+        or os.getenv("GPT_API_KEY")
+        or os.getenv("GPT_API_key")
+        or ""
+    ).strip()
     if not key:
-        raise RuntimeError("환경변수 GPT_API_key 가 설정되지 않았습니다.")
+        raise RuntimeError(
+            "OpenAI API 키가 설정되지 않았습니다. "
+            "환경변수 OPENAI_API_KEY(권장) 또는 GPT_API_KEY/GPT_API_key 를 설정하세요."
+        )
     return key
 
 
 def _openai_model() -> str:
     return (os.getenv("OPENAI_MODEL") or "gpt-4.1-mini").strip()
+
+
+def _openai_api_url() -> str:
+    return (os.getenv("OPENAI_API_URL") or OPENAI_API_URL).strip()
+
+
+def _openai_optional_headers() -> dict[str, str]:
+    headers: dict[str, str] = {}
+    org = (os.getenv("OPENAI_ORG_ID") or "").strip()
+    project = (os.getenv("OPENAI_PROJECT_ID") or "").strip()
+    if org:
+        headers["OpenAI-Organization"] = org
+    if project:
+        headers["OpenAI-Project"] = project
+    return headers
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -62,6 +86,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
     key = _openai_key()
     model = _openai_model()
+    api_url = _openai_api_url()
 
     schema_hint = {
         "executive_summary": "string",
@@ -102,13 +127,33 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
     }
 
     with httpx.Client(timeout=120) as client:
-        r = client.post(
-            OPENAI_API_URL,
-            headers={"Authorization": f"Bearer {key}"},
-            json=payload,
-        )
-        r.raise_for_status()
-        data = r.json()
+        try:
+            r = client.post(
+                api_url,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    **_openai_optional_headers(),
+                },
+                json=payload,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else None
+            body = ""
+            try:
+                body = (e.response.text or "") if e.response is not None else ""
+            except Exception:
+                body = ""
+            hint = ""
+            if status == 401:
+                hint = (
+                    " (401: API 키가 유효하지 않거나, 배포 환경에 키가 잘못 주입된 경우가 많습니다. "
+                    "OPENAI_API_KEY 값을 확인하세요.)"
+                )
+            raise RuntimeError(f"OpenAI 호출 실패: HTTP {status}. {body}{hint}") from e
+        except httpx.RequestError as e:
+            raise RuntimeError(f"OpenAI 호출 네트워크 오류: {e}") from e
 
     content = (
         (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
