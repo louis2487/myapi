@@ -70,10 +70,7 @@ def run_now(payload: ResearchRunIn, db: Session = Depends(get_db)):
         q = db.query(ResearchQuestion).filter(ResearchQuestion.id == payload.question_id).first()
         if not q:
             raise HTTPException(status_code=404, detail="question not found")
-        # 단일 실행은 실패해도 500으로 죽지 않고, failed 리포트를 반환합니다.
-        reports.append(
-            run_research_for_question(db=db, question=q, force=payload.force, raise_on_error=False)
-        )
+        reports.append(run_research_for_question(db=db, question=q, force=payload.force))
     else:
         qs = (
             db.query(ResearchQuestion)
@@ -83,14 +80,7 @@ def run_now(payload: ResearchRunIn, db: Session = Depends(get_db)):
         )
         for q in qs:
             try:
-                reports.append(
-                    run_research_for_question(
-                        db=db,
-                        question=q,
-                        force=payload.force,
-                        raise_on_error=False,
-                    )
-                )
+                reports.append(run_research_for_question(db=db, question=q, force=payload.force))
             except Exception:
                 continue
     return {"reports": reports}

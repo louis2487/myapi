@@ -47,7 +47,7 @@ from recode import ensure_recode_columns, router as recode_router
 from research import register_research_startup, router as research_router
 from routers.auth import router as auth_router
 from routers.billing import router as billing_router
-from routers.internal import router as internal_router
+from routers.internal import register_rss_startup, router as internal_router
 from routers.notify import create_notification, get_user_id_by_username, router as notify_router, send_push
 from routers.payments import router as payments_router
 from routers.play import router as play_router
@@ -73,6 +73,7 @@ app.include_router(notify_router)
 app.include_router(community_router)
 
 register_research_startup(app)
+register_rss_startup(app)
 
 from routers.community.logic import (
     AD_CARD1_MAX,

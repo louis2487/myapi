@@ -28,30 +28,10 @@ def _seoul_today() -> date:
 
 
 def _openai_key() -> str:
-    # 운영/로컬에서 환경변수 이름이 흔히 달라져서, 여러 키를 순서대로 허용합니다.
-    candidates = [
-        "OPENAI_API_KEY",
-        "GPT_API_KEY",
-        "GPT_API_key",
-        "GPT_APIKEY",
-    ]
-    raw = ""
-    for k in candidates:
-        v = os.getenv(k)
-        if v and v.strip():
-            raw = v.strip()
-            break
-    if not raw:
-        raise RuntimeError(
-            "OpenAI API 키가 설정되지 않았습니다. "
-            "환경변수 OPENAI_API_KEY(권장) 또는 GPT_API_KEY/GPT_API_key 를 설정하세요."
-        )
-    # 사용자가 실수로 "Bearer sk-..." 형태로 넣어도 동작하도록 보정
-    if raw.lower().startswith("bearer "):
-        raw = raw[7:].strip()
-    if not raw:
-        raise RuntimeError("OpenAI API 키 형식이 올바르지 않습니다.")
-    return raw
+    key = (os.getenv("GPT_API_key") or "").strip()
+    if not key:
+        raise RuntimeError("환경변수 GPT_API_key 가 설정되지 않았습니다.")
+    return key
 
 
 def _openai_model() -> str:
@@ -121,37 +101,14 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         ],
     }
 
-    headers: dict[str, str] = {"Authorization": f"Bearer {key}"}
-    org = (os.getenv("OPENAI_ORG_ID") or os.getenv("OPENAI_ORGANIZATION") or "").strip()
-    project = (os.getenv("OPENAI_PROJECT") or os.getenv("OPENAI_PROJECT_ID") or "").strip()
-    if org:
-        headers["OpenAI-Organization"] = org
-    if project:
-        headers["OpenAI-Project"] = project
-
-    try:
-        with httpx.Client(timeout=120) as client:
-            r = client.post(
-                OPENAI_API_URL,
-                headers=headers,
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
-    except httpx.HTTPStatusError as e:
-        status = e.response.status_code if e.response is not None else None
-        if status == 401:
-            body = ""
-            try:
-                body = (e.response.text or "").strip() if e.response is not None else ""
-            except Exception:
-                body = ""
-            raise RuntimeError(
-                "OpenAI 인증 실패(401)입니다. API 키가 잘못되었거나 만료/권한이 없습니다. "
-                "환경변수 OPENAI_API_KEY 값(앞에 'Bearer ' 포함 여부 포함)을 확인하세요."
-                + (f" (응답: {body})" if body else "")
-            ) from e
-        raise
+    with httpx.Client(timeout=120) as client:
+        r = client.post(
+            OPENAI_API_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            json=payload,
+        )
+        r.raise_for_status()
+        data = r.json()
 
     content = (
         (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
@@ -190,7 +147,6 @@ def run_research_for_question(
     question: ResearchQuestion,
     run_date: date | None = None,
     force: bool = False,
-    raise_on_error: bool = True,
 ) -> ResearchReport:
     run_date = run_date or _seoul_today()
 
@@ -232,9 +188,7 @@ def run_research_for_question(
         db.add(report)
         db.commit()
         db.refresh(report)
-        if raise_on_error:
-            raise
-        return report
+        raise
 
 
 def run_daily_reports(*, force: bool = False) -> list[int]:
