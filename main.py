@@ -6,6 +6,7 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 from fastapi import FastAPI, Depends, HTTPException, status, Request, Header, Query, Body
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
@@ -53,11 +54,20 @@ from routers.payments import router as payments_router
 from routers.play import router as play_router
 from routers.upload import mount_static, router as upload_router
 from routers.community import router as community_router
+from routers.parking import router as parking_router
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 SECRET_RSS_TOKEN = settings.SECRET_RSS_TOKEN
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 mount_static(app)
 
@@ -71,6 +81,7 @@ app.include_router(upload_router)
 app.include_router(internal_router)
 app.include_router(notify_router)
 app.include_router(community_router)
+app.include_router(parking_router)
 
 register_research_startup(app)
 register_rss_startup(app)

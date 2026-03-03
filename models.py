@@ -452,3 +452,33 @@ class Payment(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ParkingLocation(Base):
+    """
+    주차장에서 내 차 위치(구역/번호) 저장용 테이블.
+    - device_id 단위로 "현재 위치(is_active=true)" 1개를 유지하고,
+      저장할 때마다 이전 active를 비활성화하여 히스토리를 남깁니다.
+    """
+    __tablename__ = "parking_locations"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    device_id = Column(String(80), nullable=False, index=True)
+
+    lot_id = Column(String(80), nullable=True, index=True)
+    floor = Column(String(8), nullable=True, index=True)  # 예: B1 ~ B5
+    zone = Column(String(16), nullable=False, index=True)  # 예: A/B/C
+    spot = Column(String(32), nullable=True, index=True)   # 예: 101/102/103
+    note = Column(Text, nullable=True)
+
+    parked_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    is_active = Column(Boolean, nullable=False, server_default="true", index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
+
+    __table_args__ = (
+        Index("idx_parking_device_active", "device_id", "is_active"),
+        Index("idx_parking_device_time", "device_id", "parked_at"),
+        Index("idx_parking_device_floor_zone", "device_id", "floor", "zone"),
+    )

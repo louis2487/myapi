@@ -40,11 +40,46 @@ def _openai_key() -> str:
             "OpenAI API 키가 설정되지 않았습니다. "
             "환경변수 OPENAI_API_KEY(권장) 또는 GPT_API_KEY/GPT_API_key 를 설정하세요."
         )
+    lk = key.lower()
+    # 실수로 모델명을 키 변수에 넣는 경우가 있어 명확히 안내합니다.
+    if lk.startswith(("gpt-", "o1", "o3", "o4")) or key.upper().startswith("GPT-"):
+        raise RuntimeError(
+            "OpenAI API 키 환경변수에 모델명이 들어가 있습니다. "
+            f"(현재 값: {key}) "
+            "OPENAI_API_KEY에는 'sk-'로 시작하는 실제 API 키를 넣고, "
+            "모델은 OPENAI_MODEL로 설정하세요."
+        )
+    # 대부분의 OpenAI API 키는 sk- 로 시작합니다. 형식이 이상하면 빠르게 실패시켜 원인 파악을 돕습니다.
+    if not lk.startswith("sk-"):
+        raise RuntimeError(
+            "OpenAI API 키 형식이 올바르지 않습니다. "
+            f"(현재 값: {key}) "
+            "OPENAI_API_KEY에는 'sk-'로 시작하는 실제 API 키를 넣어주세요."
+        )
     return key
 
 
 def _openai_model() -> str:
-    return (os.getenv("OPENAI_MODEL") or "gpt-4.1-mini").strip()
+    # 기본값은 범용적으로 사용 가능한 모델로 설정합니다.
+    return (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
+
+
+def _is_invalid_model_response_body(body: str) -> bool:
+    t = (body or "").lower()
+    return ("invalid model" in t) or ("model_not_found" in t) or ("model not found" in t)
+
+
+def _candidate_models(primary: str) -> list[str]:
+    # primary를 우선 시도하고, 실패(잘못된 모델) 시 범용 모델로 폴백합니다.
+    fallbacks = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"]
+    out: list[str] = []
+    p = (primary or "").strip()
+    if p:
+        out.append(p)
+    for m in fallbacks:
+        if m not in out:
+            out.append(m)
+    return out
 
 
 def _openai_api_url() -> str:
@@ -117,43 +152,70 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         f"{json.dumps(schema_hint, ensure_ascii=False)}"
     )
 
-    payload = {
-        "model": model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
-
+    last_error: Exception | None = None
+    attempted: list[str] = []
     with httpx.Client(timeout=120) as client:
-        try:
-            r = client.post(
-                api_url,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    **_openai_optional_headers(),
-                },
-                json=payload,
-            )
-            r.raise_for_status()
-            data = r.json()
-        except httpx.HTTPStatusError as e:
-            status = e.response.status_code if e.response is not None else None
-            body = ""
+        for m in _candidate_models(model):
+            attempted.append(m)
+            payload = {
+                "model": m,
+                "temperature": 0.2,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            }
             try:
-                body = (e.response.text or "") if e.response is not None else ""
-            except Exception:
-                body = ""
-            hint = ""
-            if status == 401:
-                hint = (
-                    " (401: API 키가 유효하지 않거나, 배포 환경에 키가 잘못 주입된 경우가 많습니다. "
-                    "OPENAI_API_KEY 값을 확인하세요.)"
+                r = client.post(
+                    api_url,
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        **_openai_optional_headers(),
+                    },
+                    json=payload,
                 )
-            raise RuntimeError(f"OpenAI 호출 실패: HTTP {status}. {body}{hint}") from e
-        except httpx.RequestError as e:
-            raise RuntimeError(f"OpenAI 호출 네트워크 오류: {e}") from e
+                r.raise_for_status()
+                data = r.json()
+                break
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else None
+                body = ""
+                try:
+                    body = (e.response.text or "") if e.response is not None else ""
+                except Exception:
+                    body = ""
+
+                # 잘못된 모델인 경우에만 폴백 재시도
+                if status == 400 and _is_invalid_model_response_body(body) and (m != attempted[-1]):
+                    last_error = e
+                    continue
+
+                hint = ""
+                if status == 401:
+                    hint = (
+                        " (401: API 키가 유효하지 않거나, 배포 환경에 키가 잘못 주입된 경우가 많습니다. "
+                        "OPENAI_API_KEY 값을 확인하세요.)"
+                    )
+                if status == 400 and _is_invalid_model_response_body(body):
+                    hint = (
+                        " (400: 모델명이 유효하지 않습니다. OPENAI_MODEL을 계정에서 사용 가능한 모델로 설정하세요.)"
+                    )
+                raise RuntimeError(
+                    f"OpenAI 호출 실패(model={m}): HTTP {status}. {body}{hint}"
+                ) from e
+            except httpx.RequestError as e:
+                raise RuntimeError(f"OpenAI 호출 네트워크 오류: {e}") from e
+        else:
+            # for-else: 어떤 모델도 성공하지 못한 경우
+            if last_error is not None:
+                raise RuntimeError(
+                    "OpenAI 호출 실패: 사용 가능한 모델을 찾지 못했습니다. "
+                    f"(시도한 모델: {', '.join(attempted)})"
+                ) from last_error
+            raise RuntimeError(
+                "OpenAI 호출 실패: 알 수 없는 이유로 요청이 실패했습니다. "
+                f"(시도한 모델: {', '.join(attempted)})"
+            )
 
     content = (
         (((data.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
