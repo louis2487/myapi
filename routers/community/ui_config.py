@@ -53,10 +53,20 @@ class UIConfigPopup(BaseModel):
     resize_mode: Literal["contain", "cover", "stretch"] = "contain"
 
 
+class UIConfigTitleSearch(BaseModel):
+    """
+    제목검색 화면에서 상단에 노출할 추천 현장(게시글) 목록.
+    - recommended_post_ids: post_id 목록
+    """
+    enabled: bool = True
+    recommended_post_ids: List[int] = Field(default_factory=list)
+
+
 class UIConfigPayload(BaseModel):
     banner: UIConfigBanner = Field(default_factory=UIConfigBanner)
     top_banner: UIConfigTopBanner = Field(default_factory=UIConfigTopBanner)
     popup: UIConfigPopup = Field(default_factory=UIConfigPopup)
+    title_search: UIConfigTitleSearch = Field(default_factory=UIConfigTitleSearch)
 
 
 def _default_ui_config_dict() -> dict:
@@ -82,6 +92,10 @@ def _default_ui_config_dict() -> dict:
             "height": 360,
             "resize_mode": "contain",
         },
+        "title_search": {
+            "enabled": True,
+            "recommended_post_ids": [],
+        },
     }
 
 
@@ -92,6 +106,7 @@ def _normalize_ui_config(raw: dict | None) -> dict:
     banner = raw.get("banner") if isinstance(raw.get("banner"), dict) else {}
     top_banner = raw.get("top_banner") if isinstance(raw.get("top_banner"), dict) else {}
     popup = raw.get("popup") if isinstance(raw.get("popup"), dict) else {}
+    title_search = raw.get("title_search") if isinstance(raw.get("title_search"), dict) else {}
 
     base["banner"]["enabled"] = bool(banner.get("enabled", base["banner"]["enabled"]))
     try:
@@ -290,6 +305,28 @@ def _normalize_ui_config(raw: dict | None) -> dict:
     prm = popup.get("resize_mode", base["popup"]["resize_mode"])
     prm_s = str(prm).strip().lower() if isinstance(prm, str) else "contain"
     base["popup"]["resize_mode"] = prm_s if prm_s in ("contain", "cover", "stretch") else "contain"
+
+    # title_search: recommended posts by id
+    base["title_search"]["enabled"] = bool(title_search.get("enabled", base["title_search"]["enabled"]))
+    ids_raw = title_search.get("recommended_post_ids", [])
+    ids: list[int] = []
+    if isinstance(ids_raw, list):
+        for v in ids_raw:
+            try:
+                n = int(v)
+            except Exception:
+                continue
+            if n > 0:
+                ids.append(n)
+    # uniq keep order
+    seen = set()
+    uniq_ids: list[int] = []
+    for n in ids:
+        if n in seen:
+            continue
+        seen.add(n)
+        uniq_ids.append(n)
+    base["title_search"]["recommended_post_ids"] = uniq_ids
     return base
 
 

@@ -25,6 +25,59 @@ def notify_admin_post(db: Session, title: str, body: str, post_id: int, target_u
     return noti
 
 
+def notify_owners_post(
+    db: Session,
+    *,
+    post_id: int,
+    post_type: int,
+    author_username: str,
+    post_title: str,
+    exclude_user_id: int | None = None,
+):
+    """
+    오너(is_owner=True)에게 "글(문의 등) 등록" 푸쉬 + 미확인 알림 저장.
+    - 알림 실패는 글 등록 결과에 영향을 주지 않도록 호출부에서 try/except 처리 권장.
+    """
+    pt = int(post_type)
+    label = "글"
+    if pt == 6:
+        label = "문의글"
+    elif pt == 7:
+        label = "대행문의"
+
+    title = f"새 {label}이 등록되었습니다"
+    body = f"{author_username}님이 새로운 {label}을 작성했습니다: {post_title}"
+    data = {"post_id": int(post_id), "post_type": int(pt)}
+
+    owners = db.query(Community_User).filter(Community_User.is_owner.is_(True)).all()
+    for o in owners:
+        if exclude_user_id is not None and int(getattr(o, "id", 0) or 0) == int(exclude_user_id):
+            continue
+        try:
+            create_notification(
+                db,
+                user_id=int(o.id),
+                title=title,
+                body=body,
+                type="post",
+                data=data,
+                commit=True,
+            )
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+
+        try:
+            token = getattr(o, "push_token", None)
+            if token:
+                send_push(token, title, body, data)
+        except Exception:
+            pass
+
+
 def notify_admin_acknowledged_post(
     db: Session,
     *,

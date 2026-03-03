@@ -52,7 +52,7 @@ from routers.community.logic import (
     _rollover_ad_card_types,
     _rollover_recruit_card_types,
 )
-from routers.community.notifications import notify_admin_acknowledged_post, notify_all_push_post
+from routers.community.notifications import notify_admin_acknowledged_post, notify_all_push_post, notify_owners_post
 from routers.notify import create_notification, get_user_id_by_username, send_push
 
 
@@ -792,6 +792,16 @@ def create_post_plus(post_type: int, username: str, body: PostCreate, db: Sessio
                 # 문의글(post_type=6)은 owner도 함께 수신하도록 확장(관리자 기준 보완)
                 include_owners=(int(post_type) == 6),
             )
+        elif int(post_type) == 7:
+            # 대행문의(post_type=7): 오너에게만 알림/푸쉬
+            notify_owners_post(
+                db,
+                post_id=int(post.id),
+                post_type=int(post_type),
+                author_username=username,
+                post_title=post.title,
+                exclude_user_id=int(userId),
+            )
         elif int(post_type) == 5:
             notify_all_push_post(
                 db,
@@ -1074,6 +1084,133 @@ def list_posts(
 
         liked_rows = (
             db.query(Post_Like.post_id).filter(Post_Like.username == username, Post_Like.post_id.in_(post_ids)).all()
+        )
+        liked_ids = {pid for (pid,) in liked_rows}
+
+    items = [
+        PostOut2(
+            id=p.id,
+            author=PostAuthor(id=p.author.id, username=p.author.username),
+            title=p.title,
+            content=p.content,
+            image_url=p.image_url,
+            created_at=p.created_at,
+            contract_fee=p.contract_fee,
+            workplace_address=p.workplace_address,
+            workplace_map_url=p.workplace_map_url,
+            business_address=p.business_address,
+            business_map_url=p.business_map_url,
+            workplace_lat=p.workplace_lat,
+            workplace_lng=p.workplace_lng,
+            business_lat=p.business_lat,
+            business_lng=p.business_lng,
+            job_industry=p.job_industry,
+            job_category=p.job_category,
+            pay_support=p.pay_support,
+            meal_support=p.meal_support,
+            house_support=p.house_support,
+            company_developer=p.company_developer,
+            company_constructor=p.company_constructor,
+            company_trustee=p.company_trustee,
+            company_agency=p.company_agency,
+            agency_call=p.agency_call,
+            province=p.province,
+            city=p.city,
+            status=p.status,
+            liked=(p.id in liked_ids),
+            highlight_color=p.highlight_color,
+            highlight_content=p.highlight_content,
+            total_use=p.total_use,
+            branch_use=p.branch_use,
+            hq_use=getattr(p, "hq_use", None),
+            leader_use=p.leader_use,
+            member_use=p.member_use,
+            team_use=getattr(p, "team_use", None),
+            each_use=getattr(p, "each_use", None),
+            total_fee=p.total_fee,
+            branch_fee=p.branch_fee,
+            hq_fee=getattr(p, "hq_fee", None),
+            leader_fee=p.leader_fee,
+            member_fee=p.member_fee,
+            team_fee=getattr(p, "team_fee", None),
+            each_fee=getattr(p, "each_fee", None),
+            pay_use=p.pay_use,
+            meal_use=p.meal_use,
+            house_use=p.house_use,
+            pay_sup=p.pay_sup,
+            meal_sup=p.meal_sup,
+            house_sup=p.house_sup,
+            item1_use=p.item1_use,
+            item1_type=p.item1_type,
+            item1_sup=p.item1_sup,
+            item2_use=p.item2_use,
+            item2_type=p.item2_type,
+            item2_sup=p.item2_sup,
+            item3_use=p.item3_use,
+            item3_type=p.item3_type,
+            item3_sup=p.item3_sup,
+            item4_use=p.item4_use,
+            item4_type=p.item4_type,
+            item4_sup=p.item4_sup,
+            agent=p.agent,
+            other_role_name=getattr(p, "other_role_name", None),
+            other_role_fee=getattr(p, "other_role_fee", None),
+            post_type=p.post_type,
+            card_type=p.card_type,
+        )
+        for p in rows
+    ]
+
+    next_cursor = rows[-1].created_at.isoformat() if rows else None
+    return PostsOut2(items=items, next_cursor=next_cursor)
+
+
+@app.get("/community/posts/search/title", response_model=PostsOut2)
+def search_posts_by_title(
+    q: str = Query(..., description="검색어(제목 포함)", min_length=1, max_length=80),
+    post_type: int = Query(1, description="게시글 타입(기본: 1=현장/구인글)"),
+    username: Optional[str] = Query(None, description="좋아요 여부 계산용 유저명(선택)"),
+    cursor: Optional[str] = Query(None, description="커서: ISO8601 created_at"),
+    limit: int = Query(50, ge=1, le=100),
+    status: Optional[str] = Query("published", description="published | closed (선택)"),
+    db: Session = Depends(get_db),
+):
+    """
+    제목 검색(서버 필터).
+    - textsearch 화면/관리자 추천현장 검색에서 사용
+    - post_type 기본값은 1(현장/구인글)
+    """
+    keyword = (q or "").strip()
+    if not keyword:
+        return PostsOut2(items=[], next_cursor=None)
+
+    query = (
+        db.query(Community_Post)
+        .filter(Community_Post.post_type == int(post_type))
+        .order_by(Community_Post.created_at.desc())
+    )
+    if status in ("published", "closed"):
+        query = query.filter(Community_Post.status == status)
+
+    # 제목 부분일치(대소문자 무시)
+    query = query.filter(Community_Post.title.ilike(f"%{keyword}%"))
+
+    if cursor:
+        try:
+            cur_dt = datetime.fromisoformat(cursor)
+            query = query.filter(Community_Post.created_at < cur_dt)
+        except Exception:
+            pass
+
+    rows = query.limit(limit).all()
+
+    liked_ids = set()
+    if username and rows:
+        post_ids = [p.id for p in rows]
+        liked_rows = (
+            db.query(Post_Like.post_id)
+            .filter(Post_Like.username == username, Post_Like.post_id.in_(post_ids))
+            .all()
         )
         liked_ids = {pid for (pid,) in liked_rows}
 
