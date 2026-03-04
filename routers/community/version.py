@@ -9,6 +9,11 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+# 최소 지원 버전(하드코딩)
+# - 운영에서 .env 누락/오타로 의도치 않게 min_supported가 비는 것을 방지합니다.
+# - 최신 버전(latest)은 환경변수로 계속 제어할 수 있습니다.
+HARD_MIN_SUPPORTED_VERSION = "1.0.9"
+
 
 class AppVersionOut(BaseModel):
     status: int = 0
@@ -71,12 +76,12 @@ def community_app_version(
 
     if platform == "android":
         latest = (os.getenv("APP_ANDROID_LATEST_VERSION", "") or "").strip()
-        min_supported = (os.getenv("APP_ANDROID_MIN_SUPPORTED_VERSION", "") or "").strip()
+        min_supported = HARD_MIN_SUPPORTED_VERSION
         pkg = (os.getenv("APP_ANDROID_PACKAGE", "") or "").strip() or "com.smartgauge.bunyangpro"
         store_url = (os.getenv("APP_ANDROID_STORE_URL", "") or "").strip() or f"market://details?id={pkg}"
     else:
         latest = (os.getenv("APP_IOS_LATEST_VERSION", "") or "").strip()
-        min_supported = (os.getenv("APP_IOS_MIN_SUPPORTED_VERSION", "") or "").strip()
+        min_supported = HARD_MIN_SUPPORTED_VERSION
         store_url = (os.getenv("APP_IOS_STORE_URL", "") or "").strip() or None
 
     # 값이 비어있으면 안전한 기본값으로 보정
@@ -88,6 +93,11 @@ def community_app_version(
     else:
         latest = latest or min_supported
         min_supported = min_supported or latest
+
+    # 하드코딩된 최소 지원 버전이 최신 버전보다 높으면 최신을 최소로 끌어올림
+    # (client에서 latest를 기준으로 비교하는 로직과의 일관성 유지)
+    if _is_version_lt(latest, min_supported):
+        latest = min_supported
 
     force_update = False
     if current_version:
