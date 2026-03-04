@@ -19,12 +19,37 @@ def _try_register_korean_font() -> str:
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     except Exception:
         return "Helvetica"
 
-    candidates = [
+    candidates = []
+
+    # 운영 환경에서 폰트 경로를 직접 주입할 수 있게 합니다.
+    env_font = (os.getenv("KOREAN_FONT_PATH") or "").strip()
+    if env_font:
+        candidates.append(env_font)
+
+    # Windows (로컬 개발)
+    candidates += [
         r"C:\Windows\Fonts\malgun.ttf",
         r"C:\Windows\Fonts\malgunsl.ttf",
+    ]
+
+    # macOS (개발용)
+    candidates += [
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/Library/Fonts/AppleGothic.ttf",
+    ]
+
+    # Linux (배포용: Noto/Nanum 계열이 설치된 경우)
+    candidates += [
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumSquareR.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJKkr-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansKR-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.otf",
     ]
     for p in candidates:
         if os.path.exists(p):
@@ -34,11 +59,24 @@ def _try_register_korean_font() -> str:
                 return font_name
             except Exception:
                 continue
+
+    # OS 폰트를 못 찾는 배포 환경에서도 한글이 깨지지 않도록 CID 폰트를 시도합니다.
+    # (ReportLab 내장 매핑 기반. 환경에 따라 가장 안정적인 것을 선택)
+    for cid_name in ("HYGothic-Medium", "HYSMyeongJo-Medium"):
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(cid_name))
+            return cid_name
+        except Exception:
+            continue
     return "Helvetica"
 
 
 def _p(text: str | None) -> str:
-    return (text or "").strip().replace("\n", "<br/>")
+    # Paragraph는 내부적으로 XML 파서처럼 동작하므로, 특수문자를 이스케이프합니다.
+    from xml.sax.saxutils import escape
+
+    t = (text or "").strip()
+    return escape(t).replace("\n", "<br/>")
 
 
 def generate_research_pdf(

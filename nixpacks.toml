@@ -1,6 +1,6 @@
 
 [phases.setup]
-packages = ["postgresql"]
+packages = ["postgresql", "noto-fonts-cjk-sans", "fontconfig"]
 
 
 [phases.install]

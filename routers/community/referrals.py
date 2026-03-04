@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -229,3 +231,83 @@ LIMIT :limit
             pass
         return {"status": 8}
 
+
+@router.get("/community/referrals/status")
+def referral_status_by_date(
+    limit: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    추천 현황(일자별 집계) 목록.
+    - 반환: date(YYYY-MM-DD), referral_count
+    - created_at은 Asia/Seoul 기준 날짜로 집계합니다.
+    """
+    try:
+        sql = """
+SELECT
+  to_char(((r.created_at AT TIME ZONE 'Asia/Seoul')::date), 'YYYY-MM-DD') AS date,
+  COUNT(*)::bigint AS referral_count
+FROM referral r
+GROUP BY ((r.created_at AT TIME ZONE 'Asia/Seoul')::date)
+ORDER BY ((r.created_at AT TIME ZONE 'Asia/Seoul')::date) DESC
+LIMIT :limit
+"""
+        rows = db.execute(text(sql), {"limit": int(limit)}).fetchall()
+        items = [
+            {
+                "date": str(getattr(r, "date", "") or ""),
+                "referral_count": int(getattr(r, "referral_count", 0) or 0),
+            }
+            for r in rows
+        ]
+        return {"status": 0, "items": items}
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"status": 8, "items": []}
+
+
+@router.get("/community/referrals/status/{date}")
+def referral_status_detail_by_date(date: str, db: Session = Depends(get_db)):
+    """
+    추천 현황(특정 날짜 상세).
+    - date: YYYY-MM-DD
+    - 반환 items: (추천 받은 회원 username, 추천한 회원 username, 추천 받은 회원의 전화번호, 추천 받은 날짜)
+      -> (A_username, B_username, A_phone_number, date)
+    """
+    d = (date or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        return {"status": 1, "items": []}
+
+    try:
+        sql = """
+SELECT
+  a.username AS "A_username",
+  b.username AS "B_username",
+  a.phone_number AS "A_phone_number",
+  to_char(((r.created_at AT TIME ZONE 'Asia/Seoul')::date), 'YYYY-MM-DD') AS date
+FROM referral r
+JOIN community_users a ON a.id::bigint = r.referred_user_id
+JOIN community_users b ON b.id::bigint = r.referrer_user_id
+WHERE ((r.created_at AT TIME ZONE 'Asia/Seoul')::date) = (:date)::date
+ORDER BY r.created_at DESC, r.id DESC
+"""
+        rows = db.execute(text(sql), {"date": d}).fetchall()
+        items = [
+            {
+                "A_username": getattr(r, "A_username", None),
+                "B_username": getattr(r, "B_username", None),
+                "A_phone_number": getattr(r, "A_phone_number", None),
+                "date": str(getattr(r, "date", "") or d),
+            }
+            for r in rows
+        ]
+        return {"status": 0, "items": items}
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"status": 8, "items": []}
