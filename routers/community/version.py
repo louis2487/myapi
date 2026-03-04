@@ -76,12 +76,12 @@ def community_app_version(
 
     if platform == "android":
         latest = (os.getenv("APP_ANDROID_LATEST_VERSION", "") or "").strip()
-        min_supported = HARD_MIN_SUPPORTED_VERSION
+        min_supported = (os.getenv("APP_ANDROID_MIN_SUPPORTED_VERSION", "") or "").strip() or HARD_MIN_SUPPORTED_VERSION
         pkg = (os.getenv("APP_ANDROID_PACKAGE", "") or "").strip() or "com.smartgauge.bunyangpro"
         store_url = (os.getenv("APP_ANDROID_STORE_URL", "") or "").strip() or f"market://details?id={pkg}"
     else:
         latest = (os.getenv("APP_IOS_LATEST_VERSION", "") or "").strip()
-        min_supported = HARD_MIN_SUPPORTED_VERSION
+        min_supported = (os.getenv("APP_IOS_MIN_SUPPORTED_VERSION", "") or "").strip() or HARD_MIN_SUPPORTED_VERSION
         store_url = (os.getenv("APP_IOS_STORE_URL", "") or "").strip() or None
 
     # 값이 비어있으면 안전한 기본값으로 보정
