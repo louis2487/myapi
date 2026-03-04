@@ -287,6 +287,7 @@ SELECT
   a.username AS "A_username",
   b.username AS "B_username",
   a.phone_number AS "A_phone_number",
+  b.phone_number AS "B_phone_number",
   to_char(((r.created_at AT TIME ZONE 'Asia/Seoul')::date), 'YYYY-MM-DD') AS date
 FROM referral r
 JOIN community_users a ON a.id::bigint = r.referred_user_id
@@ -300,6 +301,7 @@ ORDER BY r.created_at DESC, r.id DESC
                 "A_username": getattr(r, "A_username", None),
                 "B_username": getattr(r, "B_username", None),
                 "A_phone_number": getattr(r, "A_phone_number", None),
+                "B_phone_number": getattr(r, "B_phone_number", None),
                 "date": str(getattr(r, "date", "") or d),
             }
             for r in rows
