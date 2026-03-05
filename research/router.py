@@ -46,21 +46,50 @@ def list_questions(
     return q.all()
 
 
+@router.get("/questions/{question_id}", response_model=ResearchQuestionOut)
+def get_question(question_id: int, db: Session = Depends(get_db)):
+    q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="question not found")
+    return q
+
+
 @router.patch("/questions/{question_id}", response_model=ResearchQuestionOut)
 def patch_question(question_id: int, payload: ResearchQuestionPatch, db: Session = Depends(get_db)):
     q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
     if not q:
         raise HTTPException(status_code=404, detail="question not found")
-    if payload.title is not None:
+    fields = getattr(payload, "model_fields_set", set())
+    if "title" in fields:
         q.title = payload.title
-    if payload.query is not None:
+    if "query" in fields:
+        if payload.query is None:
+            raise HTTPException(status_code=422, detail="query cannot be null")
         q.query = payload.query
-    if payload.is_active is not None:
+    if "is_active" in fields:
+        if payload.is_active is None:
+            raise HTTPException(status_code=422, detail="is_active cannot be null")
         q.is_active = bool(payload.is_active)
     db.add(q)
     db.commit()
     db.refresh(q)
     return q
+
+
+@router.delete("/questions/{question_id}")
+def delete_question(question_id: int, db: Session = Depends(get_db)):
+    q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="question not found")
+
+    deleted_reports = (
+        db.query(ResearchReport)
+        .filter(ResearchReport.question_id == question_id)
+        .delete(synchronize_session=False)
+    )
+    db.delete(q)
+    db.commit()
+    return {"deleted": True, "question_id": question_id, "deleted_reports": int(deleted_reports or 0)}
 
 
 @router.post("/run", response_model=ResearchRunOut)
