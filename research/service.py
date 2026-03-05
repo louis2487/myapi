@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo  # py3.9+
 except Exception:  # pragma: no cover
@@ -22,9 +22,18 @@ from .pdf import generate_research_pdf
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
 
+def _kst_tzinfo():
+    if ZoneInfo:
+        try:
+            return ZoneInfo("Asia/Seoul")
+        except Exception:
+            pass
+    return timezone(timedelta(hours=9))
+
+
 def _seoul_today() -> date:
-    tz = ZoneInfo("Asia/Seoul") if ZoneInfo else None
-    return (datetime.now(tz) if tz else datetime.now()).date()
+    tz = _kst_tzinfo()
+    return datetime.now(tz).date()
 
 
 def _openai_key() -> str:

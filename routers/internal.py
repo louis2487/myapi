@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from sqlalchemy.orm import Session
@@ -27,6 +28,15 @@ def rss_refresh(x_internal_token: str = Header(None), db: Session = Depends(get_
 
 
 _rss_scheduler = None
+
+
+def _kst_tzinfo():
+    if ZoneInfo:
+        try:
+            return ZoneInfo("Asia/Seoul")
+        except Exception:
+            pass
+    return timezone(timedelta(hours=9))
 
 
 def _rss_refresh_job() -> None:
@@ -66,14 +76,14 @@ def register_rss_startup(app: FastAPI) -> None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        tz = ZoneInfo("Asia/Seoul") if ZoneInfo else None
+        tz = _kst_tzinfo()
         _rss_scheduler = AsyncIOScheduler(
             timezone=tz,
             executors={"default": ThreadPoolExecutor(max_workers=2)},
         )
         _rss_scheduler.add_job(
             _rss_refresh_job,
-            CronTrigger(hour=hour, minute=minute),
+            CronTrigger(hour=hour, minute=minute, timezone=tz),
             id="mk_rss_daily",
             replace_existing=True,
             max_instances=1,

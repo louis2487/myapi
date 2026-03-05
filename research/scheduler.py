@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta, timezone
 
 from fastapi import FastAPI
 
@@ -13,6 +14,16 @@ except Exception:  # pragma: no cover
 
 
 _scheduler = None
+
+
+def _kst_tzinfo():
+    if ZoneInfo:
+        try:
+            return ZoneInfo("Asia/Seoul")
+        except Exception:
+            pass
+    # 고정 오프셋(KST=UTC+9) 폴백: tzdata 미설치/환경 차이에서도 항상 KST 기준 유지
+    return timezone(timedelta(hours=9))
 
 
 def register_research_startup(app: FastAPI) -> None:
@@ -33,11 +44,11 @@ def register_research_startup(app: FastAPI) -> None:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
 
-        tz = ZoneInfo("Asia/Seoul") if ZoneInfo else None
+        tz = _kst_tzinfo()
         _scheduler = AsyncIOScheduler(timezone=tz)
         _scheduler.add_job(
             run_daily_reports,
-            CronTrigger(hour=6, minute=0),
+            CronTrigger(hour=6, minute=0, timezone=tz),
             id="research_daily_0600",
             replace_existing=True,
             kwargs={"force": False},
