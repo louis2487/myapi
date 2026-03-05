@@ -139,6 +139,11 @@ def generate_research_pdf(
         Spacer(1, 8),
     ]
 
+    # 키 정규화(구버전 호환)
+    if ("insight" not in sections) and ("smartgauge_insight" in sections):
+        sections = dict(sections)
+        sections["insight"] = sections.get("smartgauge_insight")
+
     ordered = [
         ("Executive Summary", "executive_summary"),
         ("시장 상황", "market_situation"),
@@ -147,7 +152,10 @@ def generate_research_pdf(
         ("경쟁 분석", "competitive_analysis"),
         ("전략 제안", "strategy_proposals"),
         ("리스크 평가", "risk_assessment"),
-        ("SmartGauge Insight", "smartgauge_insight"),
+        ("인사이트", "insight"),
+        ("최적 실행안", "optimal_actions"),
+        ("핵심 지표", "metrics"),
+        ("로드맵", "roadmap"),
         ("결론", "conclusion"),
         ("출처", "sources_text"),
     ]

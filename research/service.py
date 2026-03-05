@@ -140,7 +140,10 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "competitive_analysis": "string",
         "strategy_proposals": "string",
         "risk_assessment": "string",
-        "smartgauge_insight": "string",
+        "insight": "string",
+        "optimal_actions": "string",
+        "metrics": "string",
+        "roadmap": "string",
         "conclusion": "string",
         "sources": [{"title": "string", "url": "string"}],
     }
@@ -231,8 +234,13 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
     )
     sections = _extract_json(content)
 
-    # 최소 키 보정
-    required = [
+    # 키 정규화(구버전 호환)
+    # - 과거 리포트/모델이 smartgauge_insight를 반환할 수 있어 insight로 흡수합니다.
+    if ("insight" not in sections) and ("smartgauge_insight" in sections):
+        sections["insight"] = sections.get("smartgauge_insight")
+
+    # 최소 키 보정: 모델 출력이 누락되어도 리포트 생성이 실패하지 않게 기본값 채움
+    required_text_keys = [
         "executive_summary",
         "market_situation",
         "problems",
@@ -240,13 +248,15 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "competitive_analysis",
         "strategy_proposals",
         "risk_assessment",
-        "smartgauge_insight",
+        "insight",
+        "optimal_actions",
+        "metrics",
+        "roadmap",
         "conclusion",
-        "sources",
     ]
-    for k in required:
-        if k not in sections:
-            raise ValueError(f"OpenAI 응답에 필수 키가 없습니다: {k}")
+    for k in required_text_keys:
+        if k not in sections or sections.get(k) is None:
+            sections[k] = ""
     if not isinstance(sections.get("sources"), list):
         sections["sources"] = []
     return sections
