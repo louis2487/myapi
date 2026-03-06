@@ -6,6 +6,29 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ResearchUserSignupIn(BaseModel):
+    password: str = Field(..., min_length=4, max_length=200)
+
+
+class ResearchUserSignupOut(BaseModel):
+    id: int
+    end_date: datetime | None = None
+    signup_date: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ResearchUserLoginIn(BaseModel):
+    id: int = Field(..., ge=1)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class ResearchUserLoginOut(BaseModel):
+    ok: bool = True
+    id: int
+    end_date: datetime | None = None
+
+
 class ResearchQuestionCreate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     query: str = Field(..., min_length=3, max_length=8000)

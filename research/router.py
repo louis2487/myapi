@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import base64
+import hashlib
+import secrets
 from datetime import date
 from pathlib import Path
 
@@ -9,7 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from deps import get_db
-from models import ResearchQuestion, ResearchReport
+from models import ResearchQuestion, ResearchReport, ResearchUser
 
 from .schemas import (
     ResearchQuestionCreate,
@@ -19,11 +22,58 @@ from .schemas import (
     ResearchReportOut,
     ResearchRunIn,
     ResearchRunOut,
+    ResearchUserLoginIn,
+    ResearchUserLoginOut,
+    ResearchUserSignupIn,
+    ResearchUserSignupOut,
 )
 from .service import run_research_for_question
 
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+_PBKDF2_ITERS = 210_000
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS)
+    return "pbkdf2_sha256${}${}${}".format(
+        _PBKDF2_ITERS,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(dk).decode("ascii"),
+    )
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        algo, iters_s, salt_b64, dk_b64 = (password_hash or "").split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iters = int(iters_s)
+        salt = base64.b64decode(salt_b64.encode("ascii"))
+        expected = base64.b64decode(dk_b64.encode("ascii"))
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters)
+        return secrets.compare_digest(dk, expected)
+    except Exception:
+        return False
+
+
+@router.post("/users/signup", response_model=ResearchUserSignupOut)
+def signup(payload: ResearchUserSignupIn, db: Session = Depends(get_db)):
+    u = ResearchUser(password_hash=_hash_password(payload.password))
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+@router.post("/users/login", response_model=ResearchUserLoginOut)
+def login(payload: ResearchUserLoginIn, db: Session = Depends(get_db)):
+    u = db.query(ResearchUser).filter(ResearchUser.id == payload.id).first()
+    if not u or not _verify_password(payload.password, u.password_hash):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    return {"ok": True, "id": int(u.id), "end_date": u.end_date}
 
 
 @router.post("/questions", response_model=ResearchQuestionOut)

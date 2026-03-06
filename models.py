@@ -111,6 +111,15 @@ class ResearchReport(Base):
     )
 
 
+class ResearchUser(Base):
+    __tablename__ = "research_users"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    password_hash = Column(Text, nullable=False)
+    end_date = Column(DateTime(timezone=False), nullable=True)
+    signup_date = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+
+
 class RangeSummaryOut(BaseModel):
     username: str
     start: str
