@@ -271,6 +271,7 @@ def run_research_for_question(
     *,
     db: Session,
     question: ResearchQuestion,
+    user_id: int | None = None,
     run_date: date | None = None,
     force: bool = False,
 ) -> ResearchReport:
@@ -284,7 +285,13 @@ def run_research_for_question(
     if existing and (existing.status == "completed") and (not force):
         return existing
 
-    report = existing or ResearchReport(question_id=question.id, run_date=run_date)
+    report = existing or ResearchReport(
+        question_id=question.id,
+        user_id=int(user_id) if user_id is not None else getattr(question, "user_id", None),
+        run_date=run_date,
+    )
+    if report.user_id is None:
+        report.user_id = getattr(question, "user_id", None)
     report.status = "running"
     report.error = None
     db.add(report)
@@ -328,13 +335,20 @@ def run_daily_reports(*, force: bool = False) -> list[int]:
         qs = (
             db.query(ResearchQuestion)
             .filter(ResearchQuestion.is_active == True)  # noqa: E712
+            .filter(ResearchQuestion.user_id.isnot(None))
             .order_by(ResearchQuestion.created_at.desc())
             .all()
         )
         today = _seoul_today()
         for q in qs:
             try:
-                r = run_research_for_question(db=db, question=q, run_date=today, force=force)
+                r = run_research_for_question(
+                    db=db,
+                    question=q,
+                    user_id=int(getattr(q, "user_id", None)) if getattr(q, "user_id", None) is not None else None,
+                    run_date=today,
+                    force=force,
+                )
                 created.append(int(r.id))
             except Exception:
                 # 개별 실패는 전체 스케줄을 막지 않음

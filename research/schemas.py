@@ -27,6 +27,7 @@ class ResearchUserLoginOut(BaseModel):
     ok: bool = True
     id: int
     end_date: datetime | None = None
+    expired: bool = False
 
 
 class ResearchQuestionCreate(BaseModel):

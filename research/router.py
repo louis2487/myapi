@@ -4,10 +4,14 @@ import os
 import base64
 import hashlib
 import secrets
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo  # py3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -35,6 +39,21 @@ router = APIRouter(prefix="/research", tags=["research"])
 _PBKDF2_ITERS = 210_000
 
 
+def _kst_tzinfo():
+    if ZoneInfo:
+        try:
+            return ZoneInfo("Asia/Seoul")
+        except Exception:
+            pass
+    return timezone(timedelta(hours=9))
+
+
+def _now_kst_naive() -> datetime:
+    # DB의 research_users.end_date는 timezone 없는 TIMESTAMP로 가정(KST 기준으로 운용).
+    # 비교를 위해 "naive datetime"으로 맞춥니다.
+    return datetime.now(_kst_tzinfo()).replace(tzinfo=None)
+
+
 def _hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS)
@@ -59,6 +78,20 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def get_research_user_id(
+    x_research_user_id: str | None = Header(default=None, alias="X-Research-User-Id"),
+) -> int:
+    if not x_research_user_id:
+        raise HTTPException(status_code=401, detail="missing user id")
+    try:
+        uid = int(x_research_user_id)
+    except Exception:
+        raise HTTPException(status_code=422, detail="invalid user id")
+    if uid <= 0:
+        raise HTTPException(status_code=422, detail="invalid user id")
+    return uid
+
+
 @router.post("/users/signup", response_model=ResearchUserSignupOut)
 def signup(payload: ResearchUserSignupIn, db: Session = Depends(get_db)):
     u = ResearchUser(password_hash=_hash_password(payload.password))
@@ -73,12 +106,30 @@ def login(payload: ResearchUserLoginIn, db: Session = Depends(get_db)):
     u = db.query(ResearchUser).filter(ResearchUser.id == payload.id).first()
     if not u or not _verify_password(payload.password, u.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
-    return {"ok": True, "id": int(u.id), "end_date": u.end_date}
+    end_date = u.end_date
+    expired = bool(end_date is not None and _now_kst_naive() > end_date)
+    return {"ok": True, "id": int(u.id), "end_date": end_date, "expired": expired}
 
 
 @router.post("/questions", response_model=ResearchQuestionOut)
-def create_question(payload: ResearchQuestionCreate, db: Session = Depends(get_db)):
-    q = ResearchQuestion(title=payload.title, query=payload.query, is_active=payload.is_active)
+def create_question(
+    payload: ResearchQuestionCreate,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    # 유저당 활성 질문 1개 제약 강제
+    if payload.is_active:
+        (
+            db.query(ResearchQuestion)
+            .filter(ResearchQuestion.user_id == user_id, ResearchQuestion.is_active == True)  # noqa: E712
+            .update({ResearchQuestion.is_active: False}, synchronize_session=False)
+        )
+    q = ResearchQuestion(
+        user_id=user_id,
+        title=payload.title,
+        query=payload.query,
+        is_active=payload.is_active,
+    )
     db.add(q)
     db.commit()
     db.refresh(q)
@@ -89,24 +140,46 @@ def create_question(payload: ResearchQuestionCreate, db: Session = Depends(get_d
 def list_questions(
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
 ):
-    q = db.query(ResearchQuestion).order_by(ResearchQuestion.created_at.desc())
+    q = (
+        db.query(ResearchQuestion)
+        .filter(ResearchQuestion.user_id == user_id)
+        .order_by(ResearchQuestion.created_at.desc())
+    )
     if active_only:
         q = q.filter(ResearchQuestion.is_active == True)  # noqa: E712
     return q.all()
 
 
 @router.get("/questions/{question_id}", response_model=ResearchQuestionOut)
-def get_question(question_id: int, db: Session = Depends(get_db)):
-    q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
+def get_question(
+    question_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    q = (
+        db.query(ResearchQuestion)
+        .filter(ResearchQuestion.id == question_id, ResearchQuestion.user_id == user_id)
+        .first()
+    )
     if not q:
         raise HTTPException(status_code=404, detail="question not found")
     return q
 
 
 @router.patch("/questions/{question_id}", response_model=ResearchQuestionOut)
-def patch_question(question_id: int, payload: ResearchQuestionPatch, db: Session = Depends(get_db)):
-    q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
+def patch_question(
+    question_id: int,
+    payload: ResearchQuestionPatch,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    q = (
+        db.query(ResearchQuestion)
+        .filter(ResearchQuestion.id == question_id, ResearchQuestion.user_id == user_id)
+        .first()
+    )
     if not q:
         raise HTTPException(status_code=404, detail="question not found")
     fields = getattr(payload, "model_fields_set", set())
@@ -119,7 +192,18 @@ def patch_question(question_id: int, payload: ResearchQuestionPatch, db: Session
     if "is_active" in fields:
         if payload.is_active is None:
             raise HTTPException(status_code=422, detail="is_active cannot be null")
-        q.is_active = bool(payload.is_active)
+        next_active = bool(payload.is_active)
+        if next_active:
+            (
+                db.query(ResearchQuestion)
+                .filter(
+                    ResearchQuestion.user_id == user_id,
+                    ResearchQuestion.id != q.id,
+                    ResearchQuestion.is_active == True,  # noqa: E712
+                )
+                .update({ResearchQuestion.is_active: False}, synchronize_session=False)
+            )
+        q.is_active = next_active
     db.add(q)
     db.commit()
     db.refresh(q)
@@ -127,14 +211,22 @@ def patch_question(question_id: int, payload: ResearchQuestionPatch, db: Session
 
 
 @router.delete("/questions/{question_id}")
-def delete_question(question_id: int, db: Session = Depends(get_db)):
-    q = db.query(ResearchQuestion).filter(ResearchQuestion.id == question_id).first()
+def delete_question(
+    question_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    q = (
+        db.query(ResearchQuestion)
+        .filter(ResearchQuestion.id == question_id, ResearchQuestion.user_id == user_id)
+        .first()
+    )
     if not q:
         raise HTTPException(status_code=404, detail="question not found")
 
     deleted_reports = (
         db.query(ResearchReport)
-        .filter(ResearchReport.question_id == question_id)
+        .filter(ResearchReport.question_id == question_id, ResearchReport.user_id == user_id)
         .delete(synchronize_session=False)
     )
     db.delete(q)
@@ -143,25 +235,22 @@ def delete_question(question_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/run", response_model=ResearchRunOut)
-def run_now(payload: ResearchRunIn, db: Session = Depends(get_db)):
+def run_now(
+    payload: ResearchRunIn,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
     reports: list[ResearchReport] = []
-    if payload.question_id is not None:
-        q = db.query(ResearchQuestion).filter(ResearchQuestion.id == payload.question_id).first()
-        if not q:
-            raise HTTPException(status_code=404, detail="question not found")
-        reports.append(run_research_for_question(db=db, question=q, force=payload.force))
-    else:
-        qs = (
-            db.query(ResearchQuestion)
-            .filter(ResearchQuestion.is_active == True)  # noqa: E712
-            .order_by(ResearchQuestion.created_at.desc())
-            .all()
-        )
-        for q in qs:
-            try:
-                reports.append(run_research_for_question(db=db, question=q, force=payload.force))
-            except Exception:
-                continue
+    if payload.question_id is None:
+        raise HTTPException(status_code=422, detail="question_id is required")
+    q = (
+        db.query(ResearchQuestion)
+        .filter(ResearchQuestion.id == payload.question_id, ResearchQuestion.user_id == user_id)
+        .first()
+    )
+    if not q:
+        raise HTTPException(status_code=404, detail="question not found")
+    reports.append(run_research_for_question(db=db, question=q, user_id=user_id, force=payload.force))
     return {"reports": reports}
 
 
@@ -170,8 +259,13 @@ def list_reports(
     question_id: int | None = Query(default=None),
     run_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
 ):
-    q = db.query(ResearchReport).order_by(ResearchReport.created_at.desc())
+    q = (
+        db.query(ResearchReport)
+        .filter(ResearchReport.user_id == user_id)
+        .order_by(ResearchReport.run_date.desc(), ResearchReport.created_at.desc())
+    )
     if question_id is not None:
         q = q.filter(ResearchReport.question_id == question_id)
     if run_date is not None:
@@ -180,18 +274,34 @@ def list_reports(
 
 
 @router.get("/reports/{report_id}", response_model=ResearchReportDetailOut)
-def get_report(report_id: int, db: Session = Depends(get_db)):
-    r = db.query(ResearchReport).filter(ResearchReport.id == report_id).first()
+def get_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    r = (
+        db.query(ResearchReport)
+        .filter(ResearchReport.id == report_id, ResearchReport.user_id == user_id)
+        .first()
+    )
     if not r:
         raise HTTPException(status_code=404, detail="report not found")
     return r
 
 
 @router.get("/reports/latest", response_model=ResearchReportOut)
-def latest_report(question_id: int = Query(...), db: Session = Depends(get_db)):
+def latest_report(
+    question_id: int = Query(...),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
     r = (
         db.query(ResearchReport)
-        .filter(ResearchReport.question_id == question_id, ResearchReport.status == "completed")
+        .filter(
+            ResearchReport.question_id == question_id,
+            ResearchReport.user_id == user_id,
+            ResearchReport.status == "completed",
+        )
         .order_by(ResearchReport.run_date.desc(), ResearchReport.created_at.desc())
         .first()
     )
@@ -201,8 +311,16 @@ def latest_report(question_id: int = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/reports/{report_id}/pdf")
-def download_pdf(report_id: int, db: Session = Depends(get_db)):
-    r = db.query(ResearchReport).filter(ResearchReport.id == report_id).first()
+def download_pdf(
+    report_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_research_user_id),
+):
+    r = (
+        db.query(ResearchReport)
+        .filter(ResearchReport.id == report_id, ResearchReport.user_id == user_id)
+        .first()
+    )
     if not r:
         raise HTTPException(status_code=404, detail="report not found")
     if not r.pdf_path:

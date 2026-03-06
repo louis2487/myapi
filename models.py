@@ -73,6 +73,7 @@ class ResearchQuestion(Base):
     __tablename__ = "research_questions"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=True, index=True)
     title = Column(Text, nullable=True)
     query = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, server_default="true", index=True)
@@ -88,11 +89,17 @@ class ResearchQuestion(Base):
         index=True,
     )
 
+    __table_args__ = (
+        Index("ix_research_questions_user_active", "user_id", "is_active"),
+        Index("ix_research_questions_user_created", "user_id", "created_at"),
+    )
+
 
 class ResearchReport(Base):
     __tablename__ = "research_reports"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=True, index=True)
     question_id = Column(BigInteger, nullable=False, index=True)
     run_date = Column(Date, nullable=False, index=True)
     status = Column(Text, nullable=False, server_default="created", index=True)
@@ -108,6 +115,8 @@ class ResearchReport(Base):
     __table_args__ = (
         UniqueConstraint("question_id", "run_date", name="uq_research_reports_question_date"),
         Index("ix_research_reports_question_date", "question_id", "run_date"),
+        Index("ix_research_reports_user_date", "user_id", "run_date"),
+        Index("ix_research_reports_user_created", "user_id", "created_at"),
     )
 
 

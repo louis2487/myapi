@@ -7,6 +7,9 @@ from fastapi import FastAPI
 
 from .service import run_daily_reports
 
+from sqlalchemy import text
+from database import engine
+
 try:
     from zoneinfo import ZoneInfo  # py3.9+
 except Exception:  # pragma: no cover
@@ -14,6 +17,47 @@ except Exception:  # pragma: no cover
 
 
 _scheduler = None
+
+
+def ensure_research_schema() -> None:
+    """
+    research_users / research_questions / research_reports 스키마 보정.
+    - create_all은 기존 테이블의 컬럼 추가를 하지 않으므로, 필요한 컬럼/제약을 best-effort로 보정합니다.
+    - 권한/환경에 따라 실패할 수 있어, 실패 시에는 예외를 그대로 올려 원인 파악을 돕습니다.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE research_questions ADD COLUMN IF NOT EXISTS user_id BIGINT"))
+        conn.execute(text("ALTER TABLE research_reports ADD COLUMN IF NOT EXISTS user_id BIGINT"))
+
+        # FK 제약은 IF NOT EXISTS가 없어 DO 블록으로 중복만 무시합니다.
+        conn.execute(
+            text(
+                """
+DO $$
+BEGIN
+  ALTER TABLE research_reports
+    ADD CONSTRAINT fk_research_reports_user
+    FOREIGN KEY (user_id) REFERENCES research_users(id);
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+"""
+            )
+        )
+        conn.execute(
+            text(
+                """
+DO $$
+BEGIN
+  ALTER TABLE research_questions
+    ADD CONSTRAINT fk_research_questions_user
+    FOREIGN KEY (user_id) REFERENCES research_users(id);
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+"""
+            )
+        )
 
 
 def _kst_tzinfo():
@@ -29,6 +73,7 @@ def _kst_tzinfo():
 def register_research_startup(app: FastAPI) -> None:
     @app.on_event("startup")
     async def _startup() -> None:
+        ensure_research_schema()
         enabled = (os.getenv("RESEARCH_SCHEDULER_ENABLED") or "1").strip().lower() not in (
             "0",
             "false",
