@@ -1,3 +1,5 @@
+import json as _pyjson
+
 from sqlalchemy import Column, Integer, String, DateTime, BigInteger, Boolean, Text, ForeignKey, Date, UniqueConstraint, Index, JSON, text, SmallInteger, Numeric
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, date
@@ -8,6 +10,59 @@ from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 import uuid as _uuid
 Base = declarative_base()
+
+
+class LenientJSON(JSON):
+    """
+    구버전/오염 데이터로 인해 DB에서 문자열을 읽어왔을 때 json 파싱이 깨져도
+    ORM 로딩 자체가 실패(500)하지 않도록, 가능한 범위에서 복구를 시도합니다.
+    """
+
+    @staticmethod
+    def _extract_outer(text: str, open_ch: str, close_ch: str) -> str | None:
+        s = (text or "").strip()
+        if not s:
+            return None
+        start = s.find(open_ch)
+        end = s.rfind(close_ch)
+        if start != -1 and end != -1 and end > start:
+            return s[start : end + 1]
+        return None
+
+    def result_processor(self, dialect, coltype):
+        impl = super().result_processor(dialect, coltype)
+
+        def process(value):
+            if value is None:
+                return None
+
+            # 정상 케이스(대부분 dialect는 이미 dict/list로 돌려줌)
+            if isinstance(value, (dict, list)):
+                return value
+
+            try:
+                return impl(value) if impl else value
+            except Exception as e:
+                # 깨진/구버전 데이터 방어: 문자열이면 최대한 복구 시도
+                if isinstance(value, str):
+                    raw = value.strip()
+                    if not raw:
+                        return None
+                    candidates: list[str] = [raw]
+                    for o, c in (("{", "}"), ("[", "]")):
+                        outer = self._extract_outer(raw, o, c)
+                        if outer and outer not in candidates:
+                            candidates.append(outer)
+                    for cand in candidates:
+                        try:
+                            return _pyjson.loads(cand)
+                        except Exception:
+                            continue
+                    return {"_parse_error": str(e), "_raw": raw}
+
+                return {"_parse_error": str(e), "_raw": repr(value)}
+
+        return process
 
 class RuntimeRecord(Base):
     __tablename__ = "time"
@@ -105,7 +160,7 @@ class ResearchReport(Base):
     status = Column(Text, nullable=False, server_default="created", index=True)
     error = Column(Text, nullable=True)
 
-    sections = Column(JSON, nullable=True)
+    sections = Column(LenientJSON, nullable=True)
     pdf_path = Column(Text, nullable=True)
 
     created_at = Column(

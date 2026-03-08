@@ -145,13 +145,25 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "metrics": "string",
         "roadmap": "string",
         "conclusion": "string",
+        "layer2_action": {
+            "one_thing": "string (오늘 하루 안에 가능한 단 1개 행동)",
+            "reason": "string (왜 이 행동이 가장 중요한지)",
+            "do_today": ["string", "string", "string"],
+            "output_by_tonight": "string (오늘 밤까지 산출물/증거)",
+            "judgement_rule": {"good": "string", "bad": "string"},
+            "next_move": {"if_good": "string", "if_bad": "string"},
+        },
         "sources": [{"title": "string", "url": "string"}],
     }
 
     system = (
         "당신은 시장/산업 리서치 애널리스트입니다. "
         "반드시 '오직 JSON'만 출력하세요(마크다운, 코드펜스, 설명 금지). "
-        "모든 본문은 한국어로 작성하되, 키 이름은 고정된 영어 키를 사용합니다."
+        "모든 본문은 한국어로 작성하되, 키 이름은 고정된 영어 키를 사용합니다. "
+        "그리고 반드시 layer2_action을 포함하세요. layer2_action은 Layer1 리포트 내용을 바탕으로, "
+        "'오늘 하루' 안에 즉시 실행 가능한 단 하나의 행동으로 정제한 결과여야 합니다. "
+        "one_thing은 구체적이고 측정 가능해야 하며(예: 전화 10통, 랜딩페이지 A/B 1개, 고객 5명 인터뷰 등), "
+        "do_today는 3개 항목으로, 30~90분 단위로 바로 실행할 수 있게 써주세요."
     )
     user = (
         "아래 질문에 대한 일일 리서치 리포트를 작성하세요.\n\n"
@@ -160,6 +172,13 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "- 분량: PDF로 약 10페이지가 나오도록 충분히 상세하게(섹션별 6~12개 문장/불릿 혼합)\n"
         "- 각 섹션은 서로 중복을 최소화\n"
         "- 출처는 최소 6개 이상, 가능한 공식/권위있는 자료 위주\n\n"
+        "Layer2 액션 설계 규칙:\n"
+        "- layer2_action.one_thing: 오늘 안에 끝낼 수 있는 단 1개 행동(실행 가능, 비용/권한 현실적)\n"
+        "- layer2_action.reason: 왜 이것이 가장 중요한지(리스크/기회/학습가치 기준)\n"
+        "- layer2_action.do_today: 오늘 할 일을 3단계로(각 단계는 30~90분 내 완료)\n"
+        "- layer2_action.output_by_tonight: 오늘 밤까지 남길 산출물(문서/시트/스크린샷/결과 수치)\n"
+        "- layer2_action.judgement_rule.good/bad: 성공/실패 판정 기준(측정 기준 포함)\n"
+        "- layer2_action.next_move.if_good/if_bad: 내일의 다음 행동\n\n"
         "반환 JSON 스키마(예시 타입):\n"
         f"{json.dumps(schema_hint, ensure_ascii=False)}"
     )
@@ -259,6 +278,40 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
             sections[k] = ""
     if not isinstance(sections.get("sources"), list):
         sections["sources"] = []
+
+    # layer2_action 기본 보정(누락/형식 오류에도 리포트 생성이 실패하지 않게)
+    l2 = sections.get("layer2_action")
+    if not isinstance(l2, dict):
+        l2 = {}
+    if not isinstance(l2.get("one_thing"), str):
+        l2["one_thing"] = ""
+    if not isinstance(l2.get("reason"), str):
+        l2["reason"] = ""
+    if not isinstance(l2.get("do_today"), list):
+        l2["do_today"] = ["", "", ""]
+    else:
+        # 길이를 3으로 맞춤
+        arr = [str(x) if isinstance(x, str) else "" for x in l2.get("do_today", [])]
+        l2["do_today"] = (arr + ["", "", ""])[:3]
+    if not isinstance(l2.get("output_by_tonight"), str):
+        l2["output_by_tonight"] = ""
+    jr = l2.get("judgement_rule")
+    if not isinstance(jr, dict):
+        jr = {}
+    if not isinstance(jr.get("good"), str):
+        jr["good"] = ""
+    if not isinstance(jr.get("bad"), str):
+        jr["bad"] = ""
+    l2["judgement_rule"] = jr
+    nm = l2.get("next_move")
+    if not isinstance(nm, dict):
+        nm = {}
+    if not isinstance(nm.get("if_good"), str):
+        nm["if_good"] = ""
+    if not isinstance(nm.get("if_bad"), str):
+        nm["if_bad"] = ""
+    l2["next_move"] = nm
+    sections["layer2_action"] = l2
     return sections
 
 

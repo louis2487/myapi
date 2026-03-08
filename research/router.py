@@ -4,6 +4,7 @@ import os
 import base64
 import hashlib
 import secrets
+import calendar
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo  # py3.9+
@@ -54,6 +55,23 @@ def _now_kst_naive() -> datetime:
     return datetime.now(_kst_tzinfo()).replace(tzinfo=None)
 
 
+def _add_months(dt: datetime, months: int) -> datetime:
+    """
+    외부 라이브러리 없이 'n개월 뒤'를 계산합니다.
+    (예: 1/31 + 1개월 => 2/28 또는 2/29로 clamp)
+    """
+    if months == 0:
+        return dt
+    y = dt.year
+    m0 = dt.month - 1
+    total = m0 + months
+    y += total // 12
+    m = (total % 12) + 1
+    last_day = calendar.monthrange(y, m)[1]
+    d = min(dt.day, last_day)
+    return dt.replace(year=y, month=m, day=d)
+
+
 def _hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS)
@@ -94,7 +112,9 @@ def get_research_user_id(
 
 @router.post("/users/signup", response_model=ResearchUserSignupOut)
 def signup(payload: ResearchUserSignupIn, db: Session = Depends(get_db)):
-    u = ResearchUser(password_hash=_hash_password(payload.password))
+    now = _now_kst_naive()
+    end_date = _add_months(now, 1)
+    u = ResearchUser(password_hash=_hash_password(payload.password), end_date=end_date)
     db.add(u)
     db.commit()
     db.refresh(u)
