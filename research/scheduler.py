@@ -93,7 +93,7 @@ def register_research_startup(app: FastAPI) -> None:
         _scheduler = AsyncIOScheduler(timezone=tz)
         _scheduler.add_job(
             run_daily_reports,
-            CronTrigger(hour=11, minute=0, timezone=tz),
+            CronTrigger(hour=11, minute=10, timezone=tz),
             id="research_daily_0600",
             replace_existing=True,
             kwargs={"force": False},
