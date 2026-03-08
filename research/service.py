@@ -141,9 +141,6 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "strategy_proposals": "string",
         "risk_assessment": "string",
         "insight": "string",
-        "optimal_actions": "string",
-        "metrics": "string",
-        "roadmap": "string",
         "conclusion": "string",
         "layer2_action": {
             "one_thing": "string (오늘 하루 안에 가능한 단 1개 행동)",
@@ -268,14 +265,15 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         "strategy_proposals",
         "risk_assessment",
         "insight",
-        "optimal_actions",
-        "metrics",
-        "roadmap",
         "conclusion",
     ]
     for k in required_text_keys:
         if k not in sections or sections.get(k) is None:
             sections[k] = ""
+
+    # 미사용 섹션 제거(구버전/모델 출력 호환)
+    for k in ("optimal_actions", "metrics", "roadmap"):
+        sections.pop(k, None)
     if not isinstance(sections.get("sources"), list):
         sections["sources"] = []
 

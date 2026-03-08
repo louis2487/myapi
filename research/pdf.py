@@ -153,9 +153,6 @@ def generate_research_pdf(
         ("전략 제안", "strategy_proposals"),
         ("리스크 평가", "risk_assessment"),
         ("인사이트", "insight"),
-        ("최적 실행안", "optimal_actions"),
-        ("핵심 지표", "metrics"),
-        ("로드맵", "roadmap"),
         ("결론", "conclusion"),
         ("출처", "sources_text"),
     ]
