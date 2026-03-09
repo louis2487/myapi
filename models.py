@@ -555,3 +555,23 @@ class ParkingLocation(Base):
         Index("idx_parking_device_time", "device_id", "parked_at"),
         Index("idx_parking_device_floor_zone", "device_id", "floor", "zone"),
     )
+
+
+class ParkingUser(Base):
+    """
+    주차앱 계정 테이블 (railway 기준 스키마 매핑).
+    \d parking_users
+    - id bigint PK (sequence)
+    - username varchar(30) UNIQUE NOT NULL
+    - password_hash text NOT NULL
+    - signup_date timestamp NOT NULL default now()
+    - floor varchar(20) NULL
+    """
+
+    __tablename__ = "parking_users"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    username = Column(String(30), nullable=False, unique=True, index=True)
+    password_hash = Column(Text, nullable=False)
+    signup_date = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
+    floor = Column(String(20), nullable=True)
