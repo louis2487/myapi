@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import secrets
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -14,6 +18,9 @@ from models import ParkingLocation
 router = APIRouter()
 
 _SCHEMA_READY = False
+_USERS_SCHEMA_READY = False
+
+_PBKDF2_ITERATIONS = 210_000
 
 
 def _ensure_parking_schema(db: Session):
@@ -45,6 +52,88 @@ def _ensure_parking_schema(db: Session):
         db.rollback()
     finally:
         _SCHEMA_READY = True
+
+
+def _ensure_parking_users_schema(db: Session):
+    global _USERS_SCHEMA_READY
+    if _USERS_SCHEMA_READY:
+        return
+    try:
+        # Postgres 기준 (BIGSERIAL + now())
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS parking_users (
+                    id BIGSERIAL PRIMARY KEY,
+                    username VARCHAR(30) NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    signup_date TIMESTAMP NOT NULL DEFAULT now()
+                );
+                """
+            )
+        )
+        # 신규 컬럼: floor (B2~B5 등)
+        db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS floor VARCHAR(20)"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        _USERS_SCHEMA_READY = True
+
+
+def _b64(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+
+def _b64d(s: str) -> bytes:
+    padded = s + "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode(padded.encode("utf-8"))
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${_b64(salt)}${_b64(dk)}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, iter_s, salt_s, hash_s = stored.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iters = int(iter_s)
+        salt = _b64d(salt_s)
+        expected = _b64d(hash_s)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters)
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
+
+
+def _get_parking_user_row(db: Session, username: str):
+    return (
+        db.execute(
+            text(
+                """
+                SELECT id, username, password_hash, signup_date, floor
+                FROM parking_users
+                WHERE username = :u
+                LIMIT 1
+                """
+            ),
+            {"u": username},
+        )
+        .mappings()
+        .first()
+    )
+
+
+def _require_parking_user(db: Session, username: str, password: str):
+    row = _get_parking_user_row(db, username)
+    if not row or not _verify_password(password, str(row["password_hash"])):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
+    return row
 
 
 def _normalize_floor(floor: str | None) -> str:
@@ -85,6 +174,24 @@ class ParkingLocationOut(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ParkingAuthIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=30)
+    password: str = Field(..., min_length=2, max_length=200)
+
+
+class ParkingUserOut(BaseModel):
+    id: int
+    username: str
+    signup_date: datetime
+    floor: str | None = None
+
+
+class ParkingUserFloorIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=30)
+    password: str = Field(..., min_length=2, max_length=200)
+    floor: str = Field(..., min_length=1, max_length=20)
 
 
 @router.get("/parking/location", response_model=ParkingLocationOut | None)
@@ -167,4 +274,87 @@ def clear_current_location(
     )
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/parking/auth/login", response_model=ParkingUserOut)
+def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    row = _get_parking_user_row(db, username)
+    if row:
+        if not _verify_password(req.password, str(row["password_hash"])):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
+        return {
+            "id": int(row["id"]),
+            "username": str(row["username"]),
+            "signup_date": row["signup_date"],
+            "floor": row.get("floor"),
+        }
+
+    # 계정이 없으면 "로그인" 요청으로 바로 생성 (회원가입 화면 제거)
+    ph = _hash_password(req.password)
+    created = (
+        db.execute(
+            text(
+                """
+                INSERT INTO parking_users (username, password_hash)
+                VALUES (:u, :ph)
+                RETURNING id, username, signup_date, floor
+                """
+            ),
+            {"u": username, "ph": ph},
+        )
+        .mappings()
+        .first()
+    )
+    db.commit()
+    if not created:
+        raise HTTPException(status_code=500, detail="Login failed.")
+    return {
+        "id": int(created["id"]),
+        "username": str(created["username"]),
+        "signup_date": created["signup_date"],
+        "floor": created.get("floor"),
+    }
+
+
+@router.put("/parking/auth/me/floor", response_model=ParkingUserOut)
+def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    user = _require_parking_user(db, username, req.password)
+    floor = req.floor.strip().upper()
+    if floor not in {"B2", "B3", "B4", "B5"}:
+        raise HTTPException(status_code=400, detail="Invalid floor. Use B2~B5.")
+
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET floor = :f
+                WHERE id = :id
+                RETURNING id, username, signup_date, floor
+                """
+            ),
+            {"f": floor, "id": int(user["id"])},
+        )
+        .mappings()
+        .first()
+    )
+    db.commit()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {
+        "id": int(row["id"]),
+        "username": str(row["username"]),
+        "signup_date": row["signup_date"],
+        "floor": row.get("floor"),
+    }
 

@@ -244,11 +244,9 @@ def delete_question(
     if not q:
         raise HTTPException(status_code=404, detail="question not found")
 
-    deleted_reports = (
-        db.query(ResearchReport)
-        .filter(ResearchReport.question_id == question_id, ResearchReport.user_id == user_id)
-        .delete(synchronize_session=False)
-    )
+    # 질문 삭제가 "리포트/PDF 삭제"로 이어지지 않도록,
+    # 리포트 레코드는 보존합니다. (리서치 목록에서 PDF 접근 유지)
+    deleted_reports = 0
     db.delete(q)
     db.commit()
     return {"deleted": True, "question_id": question_id, "deleted_reports": int(deleted_reports or 0)}
