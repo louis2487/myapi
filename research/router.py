@@ -39,6 +39,29 @@ router = APIRouter(prefix="/research", tags=["research"])
 
 _PBKDF2_ITERS = 210_000
 
+_ALLOWED_CATEGORIES = {
+    "business",
+    "shopping",
+    "investment",
+    "art",
+    "cooking",
+    "travel",
+    "self_development",
+    "career",
+    "content",
+    "relationships",
+    "lifestyle",
+}
+
+
+def _normalize_category(v: str | None) -> str:
+    s = (v or "").strip()
+    if not s:
+        return "business"
+    if s not in _ALLOWED_CATEGORIES:
+        raise HTTPException(status_code=422, detail=f"invalid category: {s}")
+    return s
+
 
 def _kst_tzinfo():
     if ZoneInfo:
@@ -149,6 +172,7 @@ def create_question(
         title=payload.title,
         query=payload.query,
         is_active=payload.is_active,
+        category=_normalize_category(payload.category),
     )
     db.add(q)
     db.commit()
@@ -224,6 +248,8 @@ def patch_question(
                 .update({ResearchQuestion.is_active: False}, synchronize_session=False)
             )
         q.is_active = next_active
+    if "category" in fields:
+        q.category = _normalize_category(payload.category)
     db.add(q)
     db.commit()
     db.refresh(q)

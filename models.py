@@ -132,6 +132,8 @@ class ResearchQuestion(Base):
     title = Column(Text, nullable=True)
     query = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, server_default="true", index=True)
+    # 0~10 카테고리(문자열 slug). DB 기본값은 business.
+    category = Column(Text, nullable=False, server_default="business", index=True)
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True

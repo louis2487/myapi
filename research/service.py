@@ -21,6 +21,224 @@ from .pdf import generate_research_pdf
 
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
+_CATEGORY_SPECS: dict[str, dict[str, Any]] = {
+    "business": {
+        "label_ko": "사업",
+        "layer1_keys": [
+            "executive_summary",
+            "market_situation",
+            "problems",
+            "opportunities",
+            "competitive_analysis",
+            "strategy_proposals",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "shopping": {
+        "label_ko": "쇼핑",
+        "layer1_keys": [
+            "executive_summary",
+            "needs_analysis",
+            "budget_situation",
+            "comparison_targets",
+            "option_analysis",
+            "pros_cons",
+            "best_fit_choice",
+            "alternatives",
+            "buying_tips",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "investment": {
+        "label_ko": "투자",
+        "layer1_keys": [
+            "executive_summary",
+            "asset_overview",
+            "market_situation",
+            "bullish_case",
+            "bearish_case",
+            "risk_assessment",
+            "scenario_analysis",
+            "time_horizon",
+            "key_indicators",
+            "insight",
+            "optimal_actions",
+            "portfolio_fit",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "art": {
+        "label_ko": "예술",
+        "layer1_keys": [
+            "executive_summary",
+            "work_overview",
+            "background_context",
+            "mood_tone",
+            "themes",
+            "symbolic_elements",
+            "style_analysis",
+            "emotional_impact",
+            "interpretation",
+            "creative_insight",
+            "optimal_actions",
+            "reference_points",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "cooking": {
+        "label_ko": "요리",
+        "layer1_keys": [
+            "executive_summary",
+            "cooking_goal",
+            "ingredient_situation",
+            "cooking_options",
+            "flavor_analysis",
+            "difficulty_time",
+            "recipe_strategy",
+            "substitution_options",
+            "failure_points",
+            "plating_serving",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "travel": {
+        "label_ko": "여행",
+        "layer1_keys": [
+            "executive_summary",
+            "trip_goal",
+            "traveler_profile",
+            "destination_options",
+            "local_highlights",
+            "itinerary_analysis",
+            "budget_situation",
+            "accommodation_transport",
+            "risk_assessment",
+            "travel_tips",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "self_development": {
+        "label_ko": "자기계발",
+        "layer1_keys": [
+            "executive_summary",
+            "current_state",
+            "goal_definition",
+            "obstacles",
+            "opportunities",
+            "learning_analysis",
+            "strategy_proposals",
+            "habit_design",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "career": {
+        "label_ko": "커리어",
+        "layer1_keys": [
+            "executive_summary",
+            "current_profile",
+            "market_situation",
+            "role_options",
+            "skill_gap",
+            "opportunities",
+            "competitive_analysis",
+            "strategy_proposals",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "content": {
+        "label_ko": "콘텐츠",
+        "layer1_keys": [
+            "executive_summary",
+            "topic_overview",
+            "audience_analysis",
+            "trend_situation",
+            "content_opportunities",
+            "competitive_analysis",
+            "angle_proposals",
+            "structure_strategy",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "relationships": {
+        "label_ko": "인간관계",
+        "layer1_keys": [
+            "executive_summary",
+            "situation_summary",
+            "stakeholder_analysis",
+            "emotional_dynamics",
+            "problems",
+            "misunderstanding_points",
+            "communication_options",
+            "strategy_proposals",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+    "lifestyle": {
+        "label_ko": "라이프스타일/의사결정",
+        "layer1_keys": [
+            "executive_summary",
+            "decision_context",
+            "current_situation",
+            "options",
+            "comparison_analysis",
+            "short_term_effects",
+            "long_term_effects",
+            "trade_offs",
+            "risk_assessment",
+            "insight",
+            "optimal_actions",
+            "metrics",
+            "conclusion",
+            "roadmap",
+        ],
+    },
+}
+
+
+def normalize_category(category: str | None) -> str:
+    s = (category or "").strip()
+    return s if s in _CATEGORY_SPECS else "business"
+
 
 def _kst_tzinfo():
     if ZoneInfo:
@@ -127,36 +345,32 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise ValueError("JSON 파싱 실패")
 
 
-def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
+def generate_sections_via_openai(*, question_query: str, category: str | None = None) -> dict[str, Any]:
     key = _openai_key()
     model = _openai_model()
     api_url = _openai_api_url()
 
-    schema_hint = {
-        "executive_summary": "string",
-        "market_situation": "string",
-        "problems": "string",
-        "opportunities": "string",
-        "competitive_analysis": "string",
-        "strategy_proposals": "string",
-        "risk_assessment": "string",
-        "insight": "string",
-        "conclusion": "string",
-        "layer2_action": {
-            "one_thing": "string (오늘 하루 안에 가능한 단 1개 행동)",
-            "reason": "string (왜 이 행동이 가장 중요한지)",
-            "do_today": ["string", "string", "string"],
-            "output_by_tonight": "string (오늘 밤까지 산출물/증거)",
-            "judgement_rule": {"good": "string", "bad": "string"},
-            "next_move": {"if_good": "string", "if_bad": "string"},
-        },
-        "sources": [{"title": "string", "url": "string"}],
+    category = normalize_category(category)
+    spec = _CATEGORY_SPECS.get(category) or _CATEGORY_SPECS["business"]
+    layer1_keys: list[str] = list(spec.get("layer1_keys") or [])
+    label_ko = str(spec.get("label_ko") or category)
+
+    schema_hint: dict[str, Any] = {k: "string" for k in layer1_keys}
+    schema_hint["layer2_action"] = {
+        "one_thing": "string (오늘 하루 안에 가능한 단 1개 행동)",
+        "reason": "string (왜 이 행동이 가장 중요한지)",
+        "do_today": ["string", "string", "string"],
+        "output_by_tonight": "string (오늘 밤까지 산출물/증거)",
+        "judgement_rule": {"good": "string", "bad": "string"},
+        "next_move": {"if_good": "string", "if_bad": "string"},
     }
+    schema_hint["sources"] = [{"title": "string", "url": "string", "published_date": "string(옵션)"}]
 
     system = (
-        "당신은 시장/산업 리서치 애널리스트입니다. "
+        f"당신은 '{label_ko}' 카테고리의 리서치를 작성하는 애널리스트입니다. "
         "반드시 '오직 JSON'만 출력하세요(마크다운, 코드펜스, 설명 금지). "
         "모든 본문은 한국어로 작성하되, 키 이름은 고정된 영어 키를 사용합니다. "
+        "반환 JSON에는 아래 스키마에 정의된 키만 포함하고(추가 키 금지), "
         "그리고 반드시 layer2_action을 포함하세요. layer2_action은 Layer1 리포트 내용을 바탕으로, "
         "'오늘 하루' 안에 즉시 실행 가능한 단 하나의 행동으로 정제한 결과여야 합니다. "
         "one_thing은 구체적이고 측정 가능해야 하며(예: 전화 10통, 랜딩페이지 A/B 1개, 고객 5명 인터뷰 등), "
@@ -164,6 +378,7 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
     )
     user = (
         "아래 질문에 대한 일일 리서치 리포트를 작성하세요.\n\n"
+        f"카테고리: {label_ko} ({category})\n"
         f"질문: {question_query}\n\n"
         "요구사항:\n"
         "- 분량: PDF로 약 10페이지가 나오도록 충분히 상세하게(섹션별 6~12개 문장/불릿 혼합)\n"
@@ -256,24 +471,12 @@ def generate_sections_via_openai(*, question_query: str) -> dict[str, Any]:
         sections["insight"] = sections.get("smartgauge_insight")
 
     # 최소 키 보정: 모델 출력이 누락되어도 리포트 생성이 실패하지 않게 기본값 채움
-    required_text_keys = [
-        "executive_summary",
-        "market_situation",
-        "problems",
-        "opportunities",
-        "competitive_analysis",
-        "strategy_proposals",
-        "risk_assessment",
-        "insight",
-        "conclusion",
-    ]
-    for k in required_text_keys:
-        if k not in sections or sections.get(k) is None:
+    for k in layer1_keys:
+        v = sections.get(k)
+        if v is None:
             sections[k] = ""
-
-    # 미사용 섹션 제거(구버전/모델 출력 호환)
-    for k in ("optimal_actions", "metrics", "roadmap"):
-        sections.pop(k, None)
+        elif not isinstance(v, str):
+            sections[k] = str(v)
     if not isinstance(sections.get("sources"), list):
         sections["sources"] = []
 
@@ -350,7 +553,10 @@ def run_research_for_question(
     db.refresh(report)
 
     try:
-        sections = generate_sections_via_openai(question_query=question.query)
+        sections = generate_sections_via_openai(
+            question_query=question.query,
+            category=getattr(question, "category", None),
+        )
         out_path = _pdf_output_path(question_id=int(question.id), run_date=run_date)
         pdf_path = generate_research_pdf(
             output_path=out_path,
