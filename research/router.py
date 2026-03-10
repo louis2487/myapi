@@ -120,8 +120,26 @@ def _verify_password(password: str, password_hash: str) -> bool:
 
 
 def get_research_user_id(
-    x_research_user_id: str | None = Header(default=None, alias="X-Research-User-Id"),
+    db: Session = Depends(get_db),
+    x_research_username: str | None = Header(default=None, alias="X-Research-Username"),
+    x_research_password: str | None = Header(default=None, alias="X-Research-Password"),
+    x_research_user_id: str | None = Header(default=None, alias="X-Research-User-Id"),  # legacy
 ) -> int:
+    """
+    신규: username 헤더 기반 인증
+    레거시: user id 헤더도 유지(기존 앱 호환)
+    """
+    if x_research_username:
+        username = (x_research_username or "").strip()
+        if not username:
+            raise HTTPException(status_code=422, detail="invalid username")
+        if not x_research_password:
+            raise HTTPException(status_code=401, detail="missing password")
+        u = db.query(ResearchUser).filter(ResearchUser.username == username).first()
+        if not u or not _verify_password(x_research_password, u.password_hash):
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        return int(u.id)
+
     if not x_research_user_id:
         raise HTTPException(status_code=401, detail="missing user id")
     try:
@@ -137,7 +155,12 @@ def get_research_user_id(
 def signup(payload: ResearchUserSignupIn, db: Session = Depends(get_db)):
     now = _now_kst_naive()
     end_date = _add_months(now, 1)
-    u = ResearchUser(password_hash=_hash_password(payload.password), end_date=end_date)
+    username = (payload.username or "").strip() or None
+    if username:
+        exists = db.query(ResearchUser.id).filter(ResearchUser.username == username).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="username already exists")
+    u = ResearchUser(username=username, password_hash=_hash_password(payload.password), end_date=end_date)
     db.add(u)
     db.commit()
     db.refresh(u)
@@ -146,12 +169,15 @@ def signup(payload: ResearchUserSignupIn, db: Session = Depends(get_db)):
 
 @router.post("/users/login", response_model=ResearchUserLoginOut)
 def login(payload: ResearchUserLoginIn, db: Session = Depends(get_db)):
-    u = db.query(ResearchUser).filter(ResearchUser.id == payload.id).first()
+    if payload.username:
+        u = db.query(ResearchUser).filter(ResearchUser.username == payload.username).first()
+    else:
+        u = db.query(ResearchUser).filter(ResearchUser.id == payload.id).first()
     if not u or not _verify_password(payload.password, u.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
     end_date = u.end_date
     expired = bool(end_date is not None and _now_kst_naive() > end_date)
-    return {"ok": True, "id": int(u.id), "end_date": end_date, "expired": expired}
+    return {"ok": True, "id": int(u.id), "username": u.username, "end_date": end_date, "expired": expired}
 
 
 @router.post("/questions", response_model=ResearchQuestionOut)

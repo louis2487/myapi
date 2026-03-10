@@ -3,15 +3,17 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ResearchUserSignupIn(BaseModel):
+    username: str | None = Field(default=None, min_length=2, max_length=50)
     password: str = Field(..., min_length=4, max_length=200)
 
 
 class ResearchUserSignupOut(BaseModel):
     id: int
+    username: str | None = None
     end_date: datetime | None = None
     signup_date: datetime
 
@@ -19,13 +21,22 @@ class ResearchUserSignupOut(BaseModel):
 
 
 class ResearchUserLoginIn(BaseModel):
-    id: int = Field(..., ge=1)
+    # username 기반 로그인으로 전환(레거시 id 로그인도 허용)
+    username: str | None = Field(default=None, min_length=2, max_length=50)
+    id: int | None = Field(default=None, ge=1)
     password: str = Field(..., min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _require_username_or_id(self):
+        if not (self.username or self.id):
+            raise ValueError("username or id is required")
+        return self
 
 
 class ResearchUserLoginOut(BaseModel):
     ok: bool = True
     id: int
+    username: str | None = None
     end_date: datetime | None = None
     expired: bool = False
 

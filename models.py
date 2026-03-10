@@ -183,6 +183,8 @@ class ResearchUser(Base):
     __tablename__ = "research_users"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    # 2026-03: username 기반 로그인/식별용 (DB 마이그레이션: ALTER TABLE research_users ADD COLUMN username TEXT;)
+    username = Column(Text, nullable=True, unique=True, index=True)
     password_hash = Column(Text, nullable=False)
     end_date = Column(DateTime(timezone=False), nullable=True)
     signup_date = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
