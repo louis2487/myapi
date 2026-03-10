@@ -284,17 +284,31 @@ def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username is required.")
 
     row = _get_parking_user_row(db, username)
-    if row:
-        if not _verify_password(req.password, str(row["password_hash"])):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
-        return {
-            "id": int(row["id"]),
-            "username": str(row["username"]),
-            "signup_date": row["signup_date"],
-            "floor": row.get("floor"),
-        }
+    if not row:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
-    # 계정이 없으면 "로그인" 요청으로 바로 생성 (회원가입 화면 제거)
+    if not _verify_password(req.password, str(row["password_hash"])):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
+
+    return {
+        "id": int(row["id"]),
+        "username": str(row["username"]),
+        "signup_date": row["signup_date"],
+        "floor": row.get("floor"),
+    }
+
+
+@router.post("/parking/auth/signup", response_model=ParkingUserOut, status_code=status.HTTP_201_CREATED)
+def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    row = _get_parking_user_row(db, username)
+    if row:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists.")
+
     ph = _hash_password(req.password)
     created = (
         db.execute(
@@ -312,7 +326,8 @@ def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
     )
     db.commit()
     if not created:
-        raise HTTPException(status_code=500, detail="Login failed.")
+        raise HTTPException(status_code=500, detail="Signup failed.")
+
     return {
         "id": int(created["id"]),
         "username": str(created["username"]),
