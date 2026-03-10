@@ -546,6 +546,10 @@ def run_research_for_question(
     )
     if report.user_id is None:
         report.user_id = getattr(question, "user_id", None)
+    # 질문 title을 리포트에 스냅샷으로 저장(질문 삭제 후에도 표시용)
+    if getattr(report, "title", None) in (None, ""):
+        qt = (getattr(question, "title", None) or "").strip()
+        report.title = qt if qt else f"질문 #{int(getattr(question, 'id', 0) or 0)}"
     report.status = "running"
     report.error = None
     db.add(report)

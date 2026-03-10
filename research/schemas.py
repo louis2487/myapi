@@ -59,6 +59,7 @@ class ResearchQuestionOut(BaseModel):
 class ResearchReportOut(BaseModel):
     id: int
     question_id: int
+    title: str | None = None
     run_date: date
     status: str
     created_at: datetime

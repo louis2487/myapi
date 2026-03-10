@@ -158,6 +158,8 @@ class ResearchReport(Base):
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     user_id = Column(BigInteger, nullable=True, index=True)
     question_id = Column(BigInteger, nullable=False, index=True)
+    # 질문 title 스냅샷(질문 삭제 후에도 리포트에 제목 유지)
+    title = Column(Text, nullable=True)
     run_date = Column(Date, nullable=False, index=True)
     status = Column(Text, nullable=False, server_default="created", index=True)
     error = Column(Text, nullable=True)
