@@ -336,6 +336,22 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/parking/auth/me", response_model=ParkingUserOut)
+def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    user = _require_parking_user(db, username, req.password)
+    return {
+        "id": int(user["id"]),
+        "username": str(user["username"]),
+        "signup_date": user["signup_date"],
+        "floor": user.get("floor"),
+    }
+
+
 @router.put("/parking/auth/me/floor", response_model=ParkingUserOut)
 def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
     _ensure_parking_users_schema(db)
