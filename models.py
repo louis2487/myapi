@@ -279,6 +279,18 @@ class Community_UI_Config(Base):
     config = Column(JSON, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
 
+class Parking_UI_Config(Base):
+    """
+    스마트파킹 앱 UI 설정(팝업 등) 1행 저장 테이블.
+    - 운영 편의상 JSON으로 유연하게 저장합니다.
+    - 단일 row(id=1)만 사용합니다.
+    """
+    __tablename__ = "parking_ui_config"
+
+    id = Column(SmallInteger, primary_key=True, index=True)
+    config = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
+
 class Community_User_Restriction(Base):
     """
     커뮤니티 유저 글 작성 제재(타입별 제한).

@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime
-from typing import List
+from typing import List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,6 +74,45 @@ def _ensure_parking_users_schema(db: Session):
         )
         # 신규 컬럼: floor (B2~B5 등)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS floor VARCHAR(20)"))
+        # 신규 컬럼: grade (normal/owner)
+        db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS grade VARCHAR(10)"))
+        # 기존 데이터 보정(컬럼이 방금 추가되었거나 null/이상치가 있는 경우)
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET grade = 'normal'
+                WHERE grade IS NULL
+                   OR grade NOT IN ('normal', 'owner')
+                """
+            )
+        )
+        # NOT NULL + DEFAULT
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET DEFAULT 'normal'"))
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET NOT NULL"))
+        # 체크 제약(이미 있으면 스킵)
+        exists = (
+            db.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'parking_users_grade_check'
+                    LIMIT 1
+                    """
+                )
+            ).scalar()
+        )
+        if not exists:
+            db.execute(
+                text(
+                    """
+                    ALTER TABLE parking_users
+                    ADD CONSTRAINT parking_users_grade_check
+                    CHECK (grade IN ('normal', 'owner'))
+                    """
+                )
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -116,7 +155,7 @@ def _get_parking_user_row(db: Session, username: str):
         db.execute(
             text(
                 """
-                SELECT id, username, password_hash, signup_date, floor
+                SELECT id, username, password_hash, signup_date, floor, grade
                 FROM parking_users
                 WHERE username = :u
                 LIMIT 1
@@ -186,6 +225,7 @@ class ParkingUserOut(BaseModel):
     username: str
     signup_date: datetime
     floor: str | None = None
+    grade: Literal["normal", "owner"] = "normal"
 
 
 class ParkingUserFloorIn(BaseModel):
@@ -295,6 +335,7 @@ def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(row["username"]),
         "signup_date": row["signup_date"],
         "floor": row.get("floor"),
+        "grade": row.get("grade") or "normal",
     }
 
 
@@ -316,7 +357,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
                 """
                 INSERT INTO parking_users (username, password_hash)
                 VALUES (:u, :ph)
-                RETURNING id, username, signup_date, floor
+                RETURNING id, username, signup_date, floor, grade
                 """
             ),
             {"u": username, "ph": ph},
@@ -333,6 +374,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(created["username"]),
         "signup_date": created["signup_date"],
         "floor": created.get("floor"),
+        "grade": created.get("grade") or "normal",
     }
 
 
@@ -349,6 +391,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(user["username"]),
         "signup_date": user["signup_date"],
         "floor": user.get("floor"),
+        "grade": user.get("grade") or "normal",
     }
 
 
@@ -371,7 +414,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
                 UPDATE parking_users
                 SET floor = :f
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor
+                RETURNING id, username, signup_date, floor, grade
                 """
             ),
             {"f": floor, "id": int(user["id"])},
@@ -387,5 +430,6 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
         "username": str(row["username"]),
         "signup_date": row["signup_date"],
         "floor": row.get("floor"),
+        "grade": row.get("grade") or "normal",
     }
 

@@ -53,6 +53,7 @@ from routers.notify import create_notification, get_user_id_by_username, router 
 from routers.payments import router as payments_router
 from routers.play import router as play_router
 from routers.parking_play import router as parking_play_router
+from routers.parking_popup import router as parking_popup_router
 from routers.upload import mount_static, router as upload_router
 from routers.community import router as community_router
 from routers.parking import router as parking_router
@@ -84,6 +85,7 @@ app.include_router(notify_router)
 app.include_router(community_router)
 app.include_router(parking_router)
 app.include_router(parking_play_router)
+app.include_router(parking_popup_router)
 
 register_research_startup(app)
 register_rss_startup(app)
