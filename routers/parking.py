@@ -76,6 +76,8 @@ def _ensure_parking_users_schema(db: Session):
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS floor VARCHAR(20)"))
         # 신규 컬럼: grade (normal/owner)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS grade VARCHAR(10)"))
+        # 신규 컬럼: pillar_number (기둥 위치)
+        db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS pillar_number VARCHAR(20)"))
         # 기존 데이터 보정(컬럼이 방금 추가되었거나 null/이상치가 있는 경우)
         db.execute(
             text(
@@ -155,7 +157,7 @@ def _get_parking_user_row(db: Session, username: str):
         db.execute(
             text(
                 """
-                SELECT id, username, password_hash, signup_date, floor, grade
+                SELECT id, username, password_hash, signup_date, floor, grade, pillar_number
                 FROM parking_users
                 WHERE username = :u
                 LIMIT 1
@@ -225,6 +227,7 @@ class ParkingUserOut(BaseModel):
     username: str
     signup_date: datetime
     floor: str | None = None
+    pillar_number: str | None = None
     grade: Literal["normal", "owner"] = "normal"
 
 
@@ -232,6 +235,12 @@ class ParkingUserFloorIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=30)
     password: str = Field(..., min_length=2, max_length=200)
     floor: str = Field(..., min_length=1, max_length=20)
+
+
+class ParkingUserPillarIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=30)
+    password: str = Field(..., min_length=2, max_length=200)
+    pillar_number: str | None = Field(default=None, max_length=20)
 
 
 @router.get("/parking/location", response_model=ParkingLocationOut | None)
@@ -335,6 +344,7 @@ def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(row["username"]),
         "signup_date": row["signup_date"],
         "floor": row.get("floor"),
+        "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
     }
 
@@ -357,7 +367,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
                 """
                 INSERT INTO parking_users (username, password_hash)
                 VALUES (:u, :ph)
-                RETURNING id, username, signup_date, floor, grade
+                RETURNING id, username, signup_date, floor, grade, pillar_number
                 """
             ),
             {"u": username, "ph": ph},
@@ -374,6 +384,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(created["username"]),
         "signup_date": created["signup_date"],
         "floor": created.get("floor"),
+        "pillar_number": created.get("pillar_number"),
         "grade": created.get("grade") or "normal",
     }
 
@@ -391,6 +402,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "username": str(user["username"]),
         "signup_date": user["signup_date"],
         "floor": user.get("floor"),
+        "pillar_number": user.get("pillar_number"),
         "grade": user.get("grade") or "normal",
     }
 
@@ -414,7 +426,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
                 UPDATE parking_users
                 SET floor = :f
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade
+                RETURNING id, username, signup_date, floor, grade, pillar_number
                 """
             ),
             {"f": floor, "id": int(user["id"])},
@@ -430,6 +442,52 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
         "username": str(row["username"]),
         "signup_date": row["signup_date"],
         "floor": row.get("floor"),
+        "pillar_number": row.get("pillar_number"),
+        "grade": row.get("grade") or "normal",
+    }
+
+
+@router.put("/parking/auth/me/pillar-number", response_model=ParkingUserOut)
+def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    user = _require_parking_user(db, username, req.password)
+    raw = (req.pillar_number or "").strip()
+    pillar_number: str | None
+    if not raw:
+        pillar_number = None
+    else:
+        if not raw.isdigit():
+            raise HTTPException(status_code=400, detail="Invalid pillar_number. Use digits only.")
+        pillar_number = raw
+
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET pillar_number = :p
+                WHERE id = :id
+                RETURNING id, username, signup_date, floor, grade, pillar_number
+                """
+            ),
+            {"p": pillar_number, "id": int(user["id"])},
+        )
+        .mappings()
+        .first()
+    )
+    db.commit()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {
+        "id": int(row["id"]),
+        "username": str(row["username"]),
+        "signup_date": row["signup_date"],
+        "floor": row.get("floor"),
+        "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
     }
 

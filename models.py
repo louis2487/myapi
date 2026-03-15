@@ -584,6 +584,8 @@ class ParkingUser(Base):
     - password_hash text NOT NULL
     - signup_date timestamp NOT NULL default now()
     - floor varchar(20) NULL
+    - grade varchar(10) NOT NULL default 'normal'
+    - pillar_number varchar(20) NULL
     """
 
     __tablename__ = "parking_users"
@@ -593,3 +595,5 @@ class ParkingUser(Base):
     password_hash = Column(Text, nullable=False)
     signup_date = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
     floor = Column(String(20), nullable=True)
+    grade = Column(String(10), nullable=False, server_default="normal")
+    pillar_number = Column(String(20), nullable=True)
