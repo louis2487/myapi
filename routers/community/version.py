@@ -12,7 +12,7 @@ router = APIRouter()
 # 최소 지원 버전(하드코딩)
 # - 운영에서 .env 누락/오타로 의도치 않게 min_supported가 비는 것을 방지합니다.
 # - 최신 버전(latest)은 환경변수로 계속 제어할 수 있습니다.
-HARD_MIN_SUPPORTED_VERSION = "1.0.9"
+HARD_MIN_SUPPORTED_VERSION = "1.1.1"
 
 
 class AppVersionOut(BaseModel):
