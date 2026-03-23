@@ -132,9 +132,9 @@ def get_file_scan_status(
     x_migration_token: str | None = Header(default=None),
 ):
     """
-    파일 스캔 상태를 반환합니다.
+    파일 스캔 상태를 반환합니다 (가벼운 응답, 파일 목록 미포함).
     - status: idle | scanning | done | error
-    - done일 때 result에 파일 목록 포함
+    - done일 때 total(파일 수)만 반환
     """
     _check_token(x_migration_token)
 
@@ -144,9 +144,46 @@ def get_file_scan_status(
             "started_at": _scan_state["started_at"],
             "finished_at": _scan_state["finished_at"],
         }
-        if _scan_state["status"] == "done":
-            resp["result"] = _scan_state["result"]
+        if _scan_state["status"] == "done" and _scan_state["result"]:
+            resp["total"] = _scan_state["result"].get("count", 0)
+            resp["base_url"] = _scan_state["result"].get("base_url", "")
         elif _scan_state["status"] == "error":
             resp["error"] = _scan_state["error"]
 
     return resp
+
+
+@router.get("/file-scan-page")
+def get_file_scan_page(
+    offset: int = 0,
+    limit: int = 6,
+    x_migration_token: str | None = Header(default=None),
+):
+    """
+    캐시된 스캔 결과에서 offset~offset+limit 구간의 파일 목록을 반환합니다.
+    - 스캔이 완료(done)되지 않았으면 409 반환
+    - 가볍고 빠른 응답 (6개씩)
+    """
+    _check_token(x_migration_token)
+
+    with _scan_lock:
+        if _scan_state["status"] != "done" or not _scan_state["result"]:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "scan_not_ready", "status": _scan_state["status"]},
+            )
+        all_files = _scan_state["result"].get("files") or []
+        base_url = _scan_state["result"].get("base_url", "")
+
+    total = len(all_files)
+    page = all_files[offset: offset + limit]
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "count": len(page),
+        "has_more": (offset + limit) < total,
+        "files": page,
+        "base_url": base_url,
+    }
