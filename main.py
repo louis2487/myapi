@@ -57,6 +57,7 @@ from routers.parking_popup import router as parking_popup_router
 from routers.upload import mount_static, router as upload_router
 from routers.community import router as community_router
 from routers.parking import router as parking_router
+from routers.admin_migration_uploads import router as admin_migration_uploads_router
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -86,6 +87,7 @@ app.include_router(community_router)
 app.include_router(parking_router)
 app.include_router(parking_play_router)
 app.include_router(parking_popup_router)
+app.include_router(admin_migration_uploads_router)
 
 register_research_startup(app)
 register_rss_startup(app)

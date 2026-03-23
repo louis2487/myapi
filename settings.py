@@ -21,3 +21,6 @@ SMART_KAKAO_KEY = os.getenv("SMART_KAKAO_KEY", "").strip()
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip() or SMART_KAKAO_KEY
 KAKAO_MOBILITY_API_KEY = os.getenv("KAKAO_MOBILITY_API_KEY", "").strip() or KAKAO_REST_API_KEY
 
+# -------------------- One-shot migration (uploads) --------------------
+# A 서버: 파일 목록 API 보호용(선택)
+MIGRATION_TOKEN = os.getenv("MIGRATION_TOKEN", "").strip()

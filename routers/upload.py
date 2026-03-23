@@ -32,12 +32,24 @@ def _ensure_ext(path: Path, raw_bytes: bytes) -> Path:
     return path.with_suffix(ext)
 
 
+def _is_mounted(app: FastAPI, path: str) -> bool:
+    for r in getattr(app, "routes", []):
+        if getattr(r, "path", None) == path:
+            return True
+    return False
+
+
 def mount_static(app: FastAPI) -> Path:
     static_dir = Path(os.getenv("STATIC_DIR", "/data/uploads")).resolve()
     static_dir.mkdir(parents=True, exist_ok=True)
     print("### STATIC_DIR =", static_dir)
     print("### STATIC_DIR exists?", static_dir.exists())
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    # 기존: /static 유지
+    if not _is_mounted(app, "/static"):
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    # 지시서/운영 호환: /uploads alias 추가 (/static과 같은 디렉토리)
+    if not _is_mounted(app, "/uploads"):
+        app.mount("/uploads", StaticFiles(directory=str(static_dir)), name="uploads")
     return static_dir
 
 
