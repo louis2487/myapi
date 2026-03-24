@@ -13,7 +13,7 @@ try:
 except Exception:  # pragma: no cover
     requests = None
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -70,10 +70,10 @@ class ReplicatingStaticFiles(StaticFiles):
             return
         try:
             with source_path.open("rb") as f:
+                encoded = base64.b64encode(f.read()).decode("ascii")
                 res = requests.post(
                     self.sync_target_url,
-                    data={"filename": source_path.name},
-                    files={"file": (source_path.name, f, "application/octet-stream")},
+                    json={"filename": source_path.name, "base64": encoded},
                     timeout=self.sync_timeout_sec,
                 )
             if res.status_code >= 400:
@@ -158,15 +158,19 @@ def upload_base64(payload: UploadBase64Request):
 
 
 @router.post("/image/send")
-async def image_send(
-    file: UploadFile = File(...),
-    filename: str | None = Form(None),
-):
-    name = _sanitize_filename(filename or file.filename or "")
+def image_send(payload: UploadBase64Request):
+    name = _sanitize_filename(payload.filename or "")
     if not name:
         raise HTTPException(status_code=400, detail="filename required")
 
-    image_bytes = await file.read()
+    if not payload.base64:
+        raise HTTPException(status_code=400, detail="base64 required")
+
+    raw_b64 = _strip_data_url(payload.base64)
+    try:
+        image_bytes = base64.b64decode(raw_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid base64")
     if not image_bytes:
         raise HTTPException(status_code=400, detail="empty file")
 
