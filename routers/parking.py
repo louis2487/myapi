@@ -550,9 +550,10 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
             text(
                 """
                 UPDATE parking_users
-                SET floor = :f
+                SET floor = :f,
+                    action_date = (now() AT TIME ZONE 'Asia/Seoul')
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade, pillar_number
+                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
                 """
             ),
             {"f": floor, "id": int(user["id"])},
@@ -595,9 +596,10 @@ def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(ge
             text(
                 """
                 UPDATE parking_users
-                SET pillar_number = :p
+                SET pillar_number = :p,
+                    action_date = (now() AT TIME ZONE 'Asia/Seoul')
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade, pillar_number
+                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
                 """
             ),
             {"p": pillar_number, "id": int(user["id"])},
