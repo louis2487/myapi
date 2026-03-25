@@ -43,6 +43,8 @@ class ReplicatingStaticFiles(StaticFiles):
         response = await super().get_response(path, scope)
 
         method = str(scope.get("method", "GET")).upper()
+        if method in {"GET", "HEAD"} and response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         if method == "GET" and response.status_code == 200 and self.sync_target_url:
             self._replicate_in_background(path)
         return response

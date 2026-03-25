@@ -4,8 +4,12 @@ import base64
 import hashlib
 import hmac
 import secrets
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import List, Literal
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +23,7 @@ router = APIRouter()
 
 _SCHEMA_READY = False
 _USERS_SCHEMA_READY = False
+_COUNT_SCHEMA_READY = False
 
 _PBKDF2_ITERATIONS = 210_000
 
@@ -67,7 +72,7 @@ def _ensure_parking_users_schema(db: Session):
                     id BIGSERIAL PRIMARY KEY,
                     username VARCHAR(30) NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    signup_date TIMESTAMP NOT NULL DEFAULT now()
+                    signup_date TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Seoul')
                 );
                 """
             )
@@ -78,6 +83,19 @@ def _ensure_parking_users_schema(db: Session):
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS grade VARCHAR(10)"))
         # 신규 컬럼: pillar_number (기둥 위치)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS pillar_number VARCHAR(20)"))
+        # 신규 컬럼: action_date (마지막 활동 시각, KST)
+        db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS action_date TIMESTAMP"))
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET action_date = (now() AT TIME ZONE 'Asia/Seoul')
+                WHERE action_date IS NULL
+                """
+            )
+        )
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN action_date SET DEFAULT (now() AT TIME ZONE 'Asia/Seoul')"))
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN signup_date SET DEFAULT (now() AT TIME ZONE 'Asia/Seoul')"))
         # 기존 데이터 보정(컬럼이 방금 추가되었거나 null/이상치가 있는 경우)
         db.execute(
             text(
@@ -121,6 +139,92 @@ def _ensure_parking_users_schema(db: Session):
         raise
     finally:
         _USERS_SCHEMA_READY = True
+
+
+def _ensure_parking_count_schema(db: Session):
+    global _COUNT_SCHEMA_READY
+    if _COUNT_SCHEMA_READY:
+        return
+    try:
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS parking_count (
+                    id BIGSERIAL PRIMARY KEY,
+                    count_date DATE NOT NULL UNIQUE,
+                    dau INTEGER NOT NULL DEFAULT 0,
+                    total_count INTEGER NOT NULL DEFAULT 0,
+                    daily_count INTEGER NOT NULL DEFAULT 0
+                );
+                """
+            )
+        )
+        db.execute(text("ALTER TABLE parking_count ADD COLUMN IF NOT EXISTS dau INTEGER NOT NULL DEFAULT 0"))
+        db.execute(text("ALTER TABLE parking_count ADD COLUMN IF NOT EXISTS total_count INTEGER NOT NULL DEFAULT 0"))
+        db.execute(text("ALTER TABLE parking_count ADD COLUMN IF NOT EXISTS daily_count INTEGER NOT NULL DEFAULT 0"))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        _COUNT_SCHEMA_READY = True
+
+
+def _today_kst() -> date:
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("Asia/Seoul")).date()
+    # zoneinfo 미지원 환경 폴백
+    return (datetime.utcnow() + timedelta(hours=9)).date()
+
+
+def _refresh_parking_count_for_date(db: Session, target_date: date):
+    stats = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM parking_users pu
+                        WHERE pu.action_date IS NOT NULL
+                          AND pu.action_date::date = :d
+                    ), 0) AS dau,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM parking_users pu
+                        WHERE pu.signup_date::date <= :d
+                    ), 0) AS total_count,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM parking_users pu
+                        WHERE pu.signup_date::date = :d
+                    ), 0) AS daily_count
+                """
+            ),
+            {"d": target_date},
+        )
+        .mappings()
+        .first()
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO parking_count (count_date, dau, total_count, daily_count)
+            VALUES (:d, :dau, :total_count, :daily_count)
+            ON CONFLICT (count_date)
+            DO UPDATE SET
+                dau = EXCLUDED.dau,
+                total_count = EXCLUDED.total_count,
+                daily_count = EXCLUDED.daily_count
+            """
+        ),
+        {
+            "d": target_date,
+            "dau": int(stats["dau"]) if stats else 0,
+            "total_count": int(stats["total_count"]) if stats else 0,
+            "daily_count": int(stats["daily_count"]) if stats else 0,
+        },
+    )
 
 
 def _b64(b: bytes) -> str:
@@ -175,6 +279,13 @@ def _require_parking_user(db: Session, username: str, password: str):
     if not row or not _verify_password(password, str(row["password_hash"])):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
     return row
+
+
+def _require_owner(db: Session, username: str, password: str):
+    user = _require_parking_user(db, username, password)
+    if (user.get("grade") or "normal") != "owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner only.")
+    return user
 
 
 def _normalize_floor(floor: str | None) -> str:
@@ -241,6 +352,21 @@ class ParkingUserPillarIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=30)
     password: str = Field(..., min_length=2, max_length=200)
     pillar_number: str | None = Field(default=None, max_length=20)
+
+
+class ParkingCountOut(BaseModel):
+    count_date: date
+    dau: int
+    total_count: int
+    daily_count: int
+
+
+class ParkingUserListItemOut(BaseModel):
+    username: str
+    floor: str | None = None
+    pillar_number: str | None = None
+    action_date: datetime | None = None
+    signup_date: datetime
 
 
 @router.get("/parking/location", response_model=ParkingLocationOut | None)
@@ -490,4 +616,122 @@ def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(ge
         "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
     }
+
+
+@router.get("/parking/admin/counts", response_model=List[ParkingCountOut])
+def parking_admin_counts(
+    username: str = Query(..., min_length=1, max_length=30),
+    password: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    _ensure_parking_users_schema(db)
+    _ensure_parking_count_schema(db)
+    _require_owner(db, username.strip(), password)
+
+    today = _today_kst()
+    for i in range(limit):
+        _refresh_parking_count_for_date(db, today - timedelta(days=i))
+    db.commit()
+
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT count_date, dau, total_count, daily_count
+                FROM parking_count
+                ORDER BY count_date DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "count_date": r["count_date"],
+            "dau": int(r["dau"] or 0),
+            "total_count": int(r["total_count"] or 0),
+            "daily_count": int(r["daily_count"] or 0),
+        }
+        for r in rows
+    ]
+
+
+@router.get("/parking/admin/counts/detail", response_model=ParkingCountOut)
+def parking_admin_count_detail(
+    count_date: date = Query(...),
+    username: str = Query(..., min_length=1, max_length=30),
+    password: str = Query(..., min_length=2, max_length=200),
+    db: Session = Depends(get_db),
+):
+    _ensure_parking_users_schema(db)
+    _ensure_parking_count_schema(db)
+    _require_owner(db, username.strip(), password)
+
+    _refresh_parking_count_for_date(db, count_date)
+    db.commit()
+
+    row = (
+        db.execute(
+            text(
+                """
+                SELECT count_date, dau, total_count, daily_count
+                FROM parking_count
+                WHERE count_date = :d
+                LIMIT 1
+                """
+            ),
+            {"d": count_date},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Count not found.")
+    return {
+        "count_date": row["count_date"],
+        "dau": int(row["dau"] or 0),
+        "total_count": int(row["total_count"] or 0),
+        "daily_count": int(row["daily_count"] or 0),
+    }
+
+
+@router.get("/parking/admin/users", response_model=List[ParkingUserListItemOut])
+def parking_admin_user_list(
+    username: str = Query(..., min_length=1, max_length=30),
+    password: str = Query(..., min_length=2, max_length=200),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+):
+    _ensure_parking_users_schema(db)
+    _require_owner(db, username.strip(), password)
+
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT username, floor, pillar_number, action_date, signup_date
+                FROM parking_users
+                ORDER BY signup_date DESC, id DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "username": str(r["username"]),
+            "floor": r.get("floor"),
+            "pillar_number": r.get("pillar_number"),
+            "action_date": r.get("action_date"),
+            "signup_date": r["signup_date"],
+        }
+        for r in rows
+    ]
 

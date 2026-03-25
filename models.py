@@ -597,3 +597,22 @@ class ParkingUser(Base):
     floor = Column(String(20), nullable=True)
     grade = Column(String(10), nullable=False, server_default="normal")
     pillar_number = Column(String(20), nullable=True)
+    action_date = Column(DateTime(timezone=False), nullable=True, server_default=func.now())
+
+
+class ParkingCount(Base):
+    """
+    일자별 주차앱 회원 지표 저장 테이블.
+    - count_date: 집계 기준일(KST)
+    - dau: 해당 일자의 활성 사용자 수(action_date 기준)
+    - total_count: 해당 일자까지 총 회원 수
+    - daily_count: 해당 일자 가입자 수(signup_date 기준)
+    """
+
+    __tablename__ = "parking_count"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    count_date = Column(Date, nullable=False, unique=True, index=True)
+    dau = Column(Integer, nullable=False, server_default="0")
+    total_count = Column(Integer, nullable=False, server_default="0")
+    daily_count = Column(Integer, nullable=False, server_default="0")
