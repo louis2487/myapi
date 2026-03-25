@@ -523,13 +523,31 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username is required.")
 
     user = _require_parking_user(db, username, req.password)
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET action_date = (now() AT TIME ZONE 'Asia/Seoul')
+                WHERE id = :id
+                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
+                """
+            ),
+            {"id": int(user["id"])},
+        )
+        .mappings()
+        .first()
+    )
+    db.commit()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
     return {
-        "id": int(user["id"]),
-        "username": str(user["username"]),
-        "signup_date": user["signup_date"],
-        "floor": user.get("floor"),
-        "pillar_number": user.get("pillar_number"),
-        "grade": user.get("grade") or "normal",
+        "id": int(row["id"]),
+        "username": str(row["username"]),
+        "signup_date": row["signup_date"],
+        "floor": row.get("floor"),
+        "pillar_number": row.get("pillar_number"),
+        "grade": row.get("grade") or "normal",
     }
 
 
