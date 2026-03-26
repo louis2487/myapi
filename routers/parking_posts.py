@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from deps import get_db
@@ -34,6 +35,41 @@ router = APIRouter()
 PARKING_POST_TYPE = 11
 
 
+def _ensure_community_user_for_parking_username(db: Session, username: str) -> None:
+    u = (username or "").strip()
+    if not u:
+        raise HTTPException(status_code=400, detail="Username is required")
+    exists = (
+        db.execute(
+            text(
+                """
+                SELECT 1
+                FROM community_users
+                WHERE username = :u
+                LIMIT 1
+                """
+            ),
+            {"u": u},
+        )
+        .scalar()
+    )
+    if exists:
+        return
+
+    # parking 전용 유저도 community 게시글/댓글 작성이 가능하도록 최소 행을 보장합니다.
+    db.execute(
+        text(
+            """
+            INSERT INTO community_users (username, password_hash, signup_date)
+            VALUES (:u, :ph, CURRENT_DATE)
+            ON CONFLICT (username) DO NOTHING
+            """
+        ),
+        {"u": u, "ph": "parking_bridge_account"},
+    )
+    db.flush()
+
+
 def _require_parking_notice_post(db: Session, post_id: int) -> Community_Post:
     post = db.query(Community_Post).filter(Community_Post.id == post_id).first()
     if not post or int(getattr(post, "post_type", 0) or 0) != PARKING_POST_TYPE:
@@ -43,12 +79,14 @@ def _require_parking_notice_post(db: Session, post_id: int) -> Community_Post:
 
 @router.post("/parking/posts/{username}", response_model=PostOut)
 def parking_create_post(username: str, body: PostCreate, db: Session = Depends(get_db)):
+    _ensure_community_user_for_parking_username(db, username)
     return community_create_post_plus(post_type=PARKING_POST_TYPE, username=username, body=body, db=db)
 
 
 @router.post("/parking/posts/{username}/type/{post_type}", response_model=PostOut)
 def parking_create_post_by_type(post_type: int, username: str, body: PostCreate, db: Session = Depends(get_db)):
     # parking 게시판은 고정 타입(11)만 사용합니다.
+    _ensure_community_user_for_parking_username(db, username)
     return community_create_post_plus(post_type=PARKING_POST_TYPE, username=username, body=body, db=db)
 
 
@@ -192,6 +230,7 @@ def parking_create_comment(
     db: Session = Depends(get_db),
 ):
     _require_parking_notice_post(db, post_id)
+    _ensure_community_user_for_parking_username(db, username)
     return community_create_comment(username=username, post_id=post_id, payload=payload, db=db)
 
 
@@ -232,6 +271,7 @@ async def parking_like_post(
     db: Session = Depends(get_db),
 ):
     _require_parking_notice_post(db, post_id)
+    _ensure_community_user_for_parking_username(db, username)
     return await community_like_post(post_id=post_id, username=username, db=db)
 
 
@@ -242,6 +282,7 @@ async def parking_unlike_post(
     db: Session = Depends(get_db),
 ):
     _require_parking_notice_post(db, post_id)
+    _ensure_community_user_for_parking_username(db, username)
     return await community_unlike_post(post_id=post_id, username=username, db=db)
 
 
@@ -252,5 +293,6 @@ async def parking_get_liked_posts(
     limit: int = 20,
     db: Session = Depends(get_db),
 ):
+    _ensure_community_user_for_parking_username(db, username)
     # 원본 liked API 동작을 유지합니다. (필요 시 후속으로 post_type=11 필터 추가 가능)
     return await community_get_liked_posts(username=username, cursor=cursor, limit=limit, db=db)
