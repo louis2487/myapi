@@ -26,7 +26,6 @@ from googleapiclient.errors import HttpError
 from typing import Optional, List, Literal
 import uuid
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 import re
 import requests
 try:
@@ -34,7 +33,6 @@ try:
 except Exception:  # pragma: no cover
     httpx = None
 import secrets
-from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 import openpyxl, tempfile
 from starlette.background import BackgroundTask
@@ -58,6 +56,7 @@ from routers.upload import mount_static, router as upload_router
 from routers.community import router as community_router
 from routers.parking import router as parking_router
 from routers.admin_migration_uploads import router as admin_migration_uploads_router
+from routers.favicon import router as favicon_router
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -74,6 +73,7 @@ app.add_middleware(
 
 mount_static(app)
 
+app.include_router(favicon_router)
 app.include_router(recode_router)
 app.include_router(research_router)
 app.include_router(auth_router)
