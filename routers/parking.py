@@ -394,6 +394,19 @@ class ParkingAuthIn(BaseModel):
     password: str = Field(..., min_length=2, max_length=200)
 
 
+class ParkingPasswordResetCheckIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=30)
+
+
+class ParkingPasswordResetCheckOut(BaseModel):
+    exists: bool
+
+
+class ParkingPasswordResetIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=30)
+    new_password: str = Field(..., min_length=2, max_length=200)
+
+
 class ParkingUserOut(BaseModel):
     id: int
     username: str
@@ -428,6 +441,53 @@ class ParkingUserListItemOut(BaseModel):
     pillar_number: str | None = None
     action_date: datetime | None = None
     signup_date: datetime
+
+
+@router.post("/parking/auth/reset-password/check", response_model=ParkingPasswordResetCheckOut)
+def parking_reset_password_check(req: ParkingPasswordResetCheckIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+    row = _get_parking_user_row(db, username)
+    return {"exists": bool(row)}
+
+
+@router.put("/parking/auth/reset-password")
+def parking_reset_password(req: ParkingPasswordResetIn, db: Session = Depends(get_db)):
+    _ensure_parking_users_schema(db)
+    _ensure_parking_daily_activity_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+    row = _get_parking_user_row(db, username)
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    new_hash = _hash_password(req.new_password)
+    updated = (
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET password_hash = :ph,
+                    action_date = (now() AT TIME ZONE 'Asia/Seoul')
+                WHERE id = :id
+                RETURNING id
+                """
+            ),
+            {"ph": new_hash, "id": int(row["id"])},
+        )
+        .mappings()
+        .first()
+    )
+    if not updated:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Password reset failed.")
+
+    _record_daily_activity(db, int(row["id"]))
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/parking/location", response_model=ParkingLocationOut | None)
