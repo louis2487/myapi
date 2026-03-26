@@ -24,6 +24,7 @@ router = APIRouter()
 _SCHEMA_READY = False
 _USERS_SCHEMA_READY = False
 _COUNT_SCHEMA_READY = False
+_DAILY_ACTIVITY_SCHEMA_READY = False
 
 _PBKDF2_ITERATIONS = 210_000
 
@@ -170,11 +171,72 @@ def _ensure_parking_count_schema(db: Session):
         _COUNT_SCHEMA_READY = True
 
 
+def _ensure_parking_daily_activity_schema(db: Session):
+    global _DAILY_ACTIVITY_SCHEMA_READY
+    if _DAILY_ACTIVITY_SCHEMA_READY:
+        return
+    try:
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS parking_user_daily_activity (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    action_day DATE NOT NULL,
+                    action_at TIMESTAMP NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Seoul')
+                );
+                """
+            )
+        )
+        db.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_parking_user_daily_activity_user_day
+                ON parking_user_daily_activity (user_id, action_day)
+                """
+            )
+        )
+        # 기존 최신 action_date를 최소한의 기준 데이터로 적재
+        db.execute(
+            text(
+                """
+                INSERT INTO parking_user_daily_activity (user_id, action_day, action_at)
+                SELECT pu.id, pu.action_date::date, pu.action_date
+                FROM parking_users pu
+                WHERE pu.action_date IS NOT NULL
+                ON CONFLICT (user_id, action_day) DO NOTHING
+                """
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        _DAILY_ACTIVITY_SCHEMA_READY = True
+
+
 def _today_kst() -> date:
     if ZoneInfo is not None:
         return datetime.now(ZoneInfo("Asia/Seoul")).date()
     # zoneinfo 미지원 환경 폴백
     return (datetime.utcnow() + timedelta(hours=9)).date()
+
+
+def _record_daily_activity(db: Session, user_id: int, action_day: date | None = None):
+    _ensure_parking_daily_activity_schema(db)
+    target_day = action_day or _today_kst()
+    db.execute(
+        text(
+            """
+            INSERT INTO parking_user_daily_activity (user_id, action_day, action_at)
+            VALUES (:uid, :d, (now() AT TIME ZONE 'Asia/Seoul'))
+            ON CONFLICT (user_id, action_day)
+            DO UPDATE SET action_at = EXCLUDED.action_at
+            """
+        ),
+        {"uid": user_id, "d": target_day},
+    )
 
 
 def _refresh_parking_count_for_date(db: Session, target_date: date):
@@ -184,10 +246,9 @@ def _refresh_parking_count_for_date(db: Session, target_date: date):
                 """
                 SELECT
                     COALESCE((
-                        SELECT COUNT(*)
-                        FROM parking_users pu
-                        WHERE pu.action_date IS NOT NULL
-                          AND pu.action_date::date = :d
+                        SELECT COUNT(DISTINCT pda.user_id)
+                        FROM parking_user_daily_activity pda
+                        WHERE pda.action_day = :d
                     ), 0) AS dau,
                     COALESCE((
                         SELECT COUNT(*)
@@ -518,6 +579,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
 @router.post("/parking/auth/me", response_model=ParkingUserOut)
 def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
     _ensure_parking_users_schema(db)
+    _ensure_parking_daily_activity_schema(db)
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
@@ -538,6 +600,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         .mappings()
         .first()
     )
+    _record_daily_activity(db, int(user["id"]))
     db.commit()
     if not row:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -554,6 +617,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
 @router.put("/parking/auth/me/floor", response_model=ParkingUserOut)
 def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
     _ensure_parking_users_schema(db)
+    _ensure_parking_daily_activity_schema(db)
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
@@ -579,6 +643,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
         .mappings()
         .first()
     )
+    _record_daily_activity(db, int(user["id"]))
     db.commit()
     if not row:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -595,6 +660,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
 @router.put("/parking/auth/me/pillar-number", response_model=ParkingUserOut)
 def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(get_db)):
     _ensure_parking_users_schema(db)
+    _ensure_parking_daily_activity_schema(db)
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
@@ -625,6 +691,7 @@ def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(ge
         .mappings()
         .first()
     )
+    _record_daily_activity(db, int(user["id"]))
     db.commit()
     if not row:
         raise HTTPException(status_code=404, detail="User not found.")
@@ -647,6 +714,7 @@ def parking_admin_counts(
 ):
     _ensure_parking_users_schema(db)
     _ensure_parking_count_schema(db)
+    _ensure_parking_daily_activity_schema(db)
     _require_owner(db, username.strip(), password)
 
     today = _today_kst()
@@ -689,6 +757,7 @@ def parking_admin_count_detail(
 ):
     _ensure_parking_users_schema(db)
     _ensure_parking_count_schema(db)
+    _ensure_parking_daily_activity_schema(db)
     _require_owner(db, username.strip(), password)
 
     _refresh_parking_count_for_date(db, count_date)
