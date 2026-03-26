@@ -80,7 +80,7 @@ def _ensure_parking_users_schema(db: Session):
         )
         # 신규 컬럼: floor (B2~B5 등)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS floor VARCHAR(20)"))
-        # 신규 컬럼: grade (normal/owner)
+        # 신규 컬럼: grade (normal/owner/admin)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS grade VARCHAR(10)"))
         # 신규 컬럼: pillar_number (기둥 위치)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS pillar_number VARCHAR(20)"))
@@ -104,36 +104,24 @@ def _ensure_parking_users_schema(db: Session):
                 UPDATE parking_users
                 SET grade = 'normal'
                 WHERE grade IS NULL
-                   OR grade NOT IN ('normal', 'owner')
+                   OR grade NOT IN ('normal', 'owner', 'admin')
                 """
             )
         )
         # NOT NULL + DEFAULT
         db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET DEFAULT 'normal'"))
         db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET NOT NULL"))
-        # 체크 제약(이미 있으면 스킵)
-        exists = (
-            db.execute(
-                text(
-                    """
-                    SELECT 1
-                    FROM pg_constraint
-                    WHERE conname = 'parking_users_grade_check'
-                    LIMIT 1
-                    """
-                )
-            ).scalar()
-        )
-        if not exists:
-            db.execute(
-                text(
-                    """
-                    ALTER TABLE parking_users
-                    ADD CONSTRAINT parking_users_grade_check
-                    CHECK (grade IN ('normal', 'owner'))
-                    """
-                )
+        # 체크 제약 재정의(운영 중 기존 제약 normal/owner 만 있는 경우 admin 허용으로 교체)
+        db.execute(text("ALTER TABLE parking_users DROP CONSTRAINT IF EXISTS parking_users_grade_check"))
+        db.execute(
+            text(
+                """
+                ALTER TABLE parking_users
+                ADD CONSTRAINT parking_users_grade_check
+                CHECK (grade IN ('normal', 'owner', 'admin'))
+                """
             )
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -413,7 +401,7 @@ class ParkingUserOut(BaseModel):
     signup_date: datetime
     floor: str | None = None
     pillar_number: str | None = None
-    grade: Literal["normal", "owner"] = "normal"
+    grade: Literal["normal", "owner", "admin"] = "normal"
 
 
 class ParkingUserFloorIn(BaseModel):
