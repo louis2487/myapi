@@ -15,6 +15,7 @@ from routers.parking import (
     _ensure_parking_daily_activity_schema,
     _ensure_parking_users_schema,
     _refresh_parking_count_for_date,
+    _require_parking_user,
     _require_owner,
     _today_kst,
 )
@@ -32,7 +33,7 @@ def parking_admin_counts(
     _ensure_parking_users_schema(db)
     _ensure_parking_count_schema(db)
     _ensure_parking_daily_activity_schema(db)
-    _require_owner(db, username.strip(), password)
+    _require_parking_user(db, username.strip(), password)
 
     today = _today_kst()
     for i in range(limit):
@@ -75,7 +76,7 @@ def parking_admin_count_detail(
     _ensure_parking_users_schema(db)
     _ensure_parking_count_schema(db)
     _ensure_parking_daily_activity_schema(db)
-    _require_owner(db, username.strip(), password)
+    _require_parking_user(db, username.strip(), password)
 
     _refresh_parking_count_for_date(db, count_date)
     db.commit()
