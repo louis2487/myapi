@@ -448,6 +448,8 @@ def parking_reset_password(req: ParkingPasswordResetIn, db: Session = Depends(ge
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
+    if username == "루이스":
+        raise HTTPException(status_code=403, detail="소유자 계정 비밀번호는 변경할 수 없습니다.")
     row = _get_parking_user_row(db, username)
     if not row:
         raise HTTPException(status_code=404, detail="User not found.")
