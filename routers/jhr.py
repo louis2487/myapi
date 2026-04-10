@@ -47,6 +47,81 @@ def _ensure_jhr_schema(db: Session):
             )
         )
         db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS creator_user_id BIGINT"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS title VARCHAR(255)"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS description TEXT"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS price NUMERIC(12,2)"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS capacity INTEGER"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS current_count INTEGER"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS end_date TIMESTAMPTZ"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS status VARCHAR(20)"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))
+        db.execute(text("ALTER TABLE jhr_classes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+
+        db.execute(
+            text(
+                """
+                UPDATE jhr_classes
+                SET title = COALESCE(NULLIF(title, ''), '제목 없음')
+                WHERE title IS NULL OR title = ''
+                """
+            )
+        )
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN title SET NOT NULL"))
+
+        db.execute(text("UPDATE jhr_classes SET price = 0 WHERE price IS NULL"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN price SET DEFAULT 0"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN price SET NOT NULL"))
+
+        db.execute(text("UPDATE jhr_classes SET capacity = 1 WHERE capacity IS NULL OR capacity < 1"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN capacity SET DEFAULT 1"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN capacity SET NOT NULL"))
+
+        db.execute(text("UPDATE jhr_classes SET current_count = 0 WHERE current_count IS NULL OR current_count < 0"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN current_count SET DEFAULT 0"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN current_count SET NOT NULL"))
+
+        db.execute(text("UPDATE jhr_classes SET created_at = now() WHERE created_at IS NULL"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN created_at SET DEFAULT now()"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN created_at SET NOT NULL"))
+
+        db.execute(text("UPDATE jhr_classes SET updated_at = now() WHERE updated_at IS NULL"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN updated_at SET DEFAULT now()"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN updated_at SET NOT NULL"))
+
+        db.execute(
+            text(
+                """
+                UPDATE jhr_classes
+                SET start_date = COALESCE(start_date, created_at, now())
+                WHERE start_date IS NULL
+                """
+            )
+        )
+        db.execute(
+            text(
+                """
+                UPDATE jhr_classes
+                SET end_date = COALESCE(end_date, start_date + interval '1 day', now() + interval '1 day')
+                WHERE end_date IS NULL
+                """
+            )
+        )
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN start_date SET NOT NULL"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN end_date SET NOT NULL"))
+
+        db.execute(
+            text(
+                """
+                UPDATE jhr_classes
+                SET status = 'DRAFT'
+                WHERE status IS NULL OR status NOT IN ('DRAFT', 'OPEN', 'CLOSED')
+                """
+            )
+        )
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN status SET DEFAULT 'DRAFT'"))
+        db.execute(text("ALTER TABLE jhr_classes ALTER COLUMN status SET NOT NULL"))
+
         db.execute(
             text(
                 """
