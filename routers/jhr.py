@@ -271,6 +271,7 @@ class JhrEnrollmentActionIn(JhrRoleAuthIn):
 class JhrEnrollmentOut(BaseModel):
     id: int
     user_id: int
+    username: str | None = None
     class_id: int
     status: Literal["PENDING", "CONFIRMED", "CANCELLED"]
     applied_at: datetime
@@ -959,8 +960,9 @@ def list_class_students(
         db.execute(
             text(
                 """
-                SELECT e.*
+                SELECT e.*, pu.username AS username
                 FROM jhr_enrollments e
+                LEFT JOIN parking_users pu ON pu.id = e.user_id
                 WHERE e.class_id = :cid
                 ORDER BY e.applied_at DESC, e.id DESC
                 """
@@ -974,6 +976,7 @@ def list_class_students(
         {
             "id": int(r["id"]),
             "user_id": int(r["user_id"]),
+            "username": r.get("username"),
             "class_id": int(r["class_id"]),
             "status": str(r["status"]),
             "applied_at": r["applied_at"],
