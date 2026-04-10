@@ -521,7 +521,7 @@ def update_jhr_class_status(class_id: int, req: JhrClassStatusIn, db: Session = 
     return _row_to_class_out(updated, None)
 
 
-@router.put("/jhr/classes/status-change", response_model=JhrClassOut)
+@router.put("/jhr/class-status/change", response_model=JhrClassOut)
 def update_jhr_class_status_change(req: JhrClassStatusChangeIn, db: Session = Depends(get_db)):
     _ensure_parking_users_schema(db)
     _ensure_jhr_schema(db)
