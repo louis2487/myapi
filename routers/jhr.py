@@ -693,8 +693,9 @@ def create_jhr_enrollment(req: JhrEnrollmentReqIn, db: Session = Depends(get_db)
     _ensure_parking_daily_activity_schema(db)
     student = _require_student(db, req.username.strip(), req.password)
 
+    # 동시 신청 제어: 클래스 row lock 후 정원 체크
     class_row = (
-        db.execute(text("SELECT * FROM jhr_classes WHERE id = :id LIMIT 1"), {"id": req.class_id})
+        db.execute(text("SELECT * FROM jhr_classes WHERE id = :id FOR UPDATE"), {"id": req.class_id})
         .mappings()
         .first()
     )
@@ -702,6 +703,24 @@ def create_jhr_enrollment(req: JhrEnrollmentReqIn, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Class not found.")
     if str(class_row["status"]) != "OPEN":
         raise HTTPException(status_code=400, detail="Class is not open for enrollment.")
+
+    capacity = int(class_row.get("capacity") or 0)
+    active_count_row = (
+        db.execute(
+            text(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM jhr_enrollments
+                WHERE class_id = :cid
+                  AND status IN ('PENDING', 'CONFIRMED')
+                """
+            ),
+            {"cid": req.class_id},
+        )
+        .mappings()
+        .first()
+    )
+    active_count = int(active_count_row["cnt"] or 0) if active_count_row else 0
 
     exists = (
         db.execute(
@@ -720,6 +739,8 @@ def create_jhr_enrollment(req: JhrEnrollmentReqIn, db: Session = Depends(get_db)
     )
     if exists:
         if str(exists["status"]) == "CANCELLED":
+            if active_count >= capacity:
+                raise HTTPException(status_code=409, detail="Class capacity exceeded.")
             updated = (
                 db.execute(
                     text(
@@ -748,6 +769,9 @@ def create_jhr_enrollment(req: JhrEnrollmentReqIn, db: Session = Depends(get_db)
                 "class_title": str(class_row["title"]),
             }
         raise HTTPException(status_code=409, detail="Already enrolled.")
+
+    if active_count >= capacity:
+        raise HTTPException(status_code=409, detail="Class capacity exceeded.")
 
     created = (
         db.execute(
