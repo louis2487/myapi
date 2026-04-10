@@ -82,6 +82,8 @@ def _ensure_parking_users_schema(db: Session):
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS floor VARCHAR(20)"))
         # 신규 컬럼: grade (normal/owner/admin)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS grade VARCHAR(10)"))
+        # 신규 컬럼: role (STUDENT/CREATOR)
+        db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS role VARCHAR(20)"))
         # 신규 컬럼: pillar_number (기둥 위치)
         db.execute(text("ALTER TABLE parking_users ADD COLUMN IF NOT EXISTS pillar_number VARCHAR(20)"))
         # 신규 컬럼: action_date (마지막 활동 시각, KST)
@@ -108,17 +110,39 @@ def _ensure_parking_users_schema(db: Session):
                 """
             )
         )
+        db.execute(
+            text(
+                """
+                UPDATE parking_users
+                SET role = 'STUDENT'
+                WHERE role IS NULL
+                   OR role NOT IN ('STUDENT', 'CREATOR')
+                """
+            )
+        )
         # NOT NULL + DEFAULT
         db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET DEFAULT 'normal'"))
         db.execute(text("ALTER TABLE parking_users ALTER COLUMN grade SET NOT NULL"))
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN role SET DEFAULT 'STUDENT'"))
+        db.execute(text("ALTER TABLE parking_users ALTER COLUMN role SET NOT NULL"))
         # 체크 제약 재정의(운영 중 기존 제약 normal/owner 만 있는 경우 admin 허용으로 교체)
         db.execute(text("ALTER TABLE parking_users DROP CONSTRAINT IF EXISTS parking_users_grade_check"))
+        db.execute(text("ALTER TABLE parking_users DROP CONSTRAINT IF EXISTS parking_users_role_check"))
         db.execute(
             text(
                 """
                 ALTER TABLE parking_users
                 ADD CONSTRAINT parking_users_grade_check
                 CHECK (grade IN ('normal', 'owner', 'admin'))
+                """
+            )
+        )
+        db.execute(
+            text(
+                """
+                ALTER TABLE parking_users
+                ADD CONSTRAINT parking_users_role_check
+                CHECK (role IN ('STUDENT', 'CREATOR'))
                 """
             )
         )
@@ -310,7 +334,7 @@ def _get_parking_user_row(db: Session, username: str):
         db.execute(
             text(
                 """
-                SELECT id, username, password_hash, signup_date, floor, grade, pillar_number
+                SELECT id, username, password_hash, signup_date, floor, grade, role, pillar_number
                 FROM parking_users
                 WHERE username = :u
                 LIMIT 1
@@ -402,6 +426,7 @@ class ParkingUserOut(BaseModel):
     floor: str | None = None
     pillar_number: str | None = None
     grade: Literal["normal", "owner", "admin"] = "normal"
+    role: Literal["STUDENT", "CREATOR"] = "STUDENT"
 
 
 class ParkingUserFloorIn(BaseModel):
@@ -583,6 +608,7 @@ def parking_login(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "floor": row.get("floor"),
         "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
+        "role": row.get("role") or "STUDENT",
     }
 
 
@@ -604,7 +630,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
                 """
                 INSERT INTO parking_users (username, password_hash)
                 VALUES (:u, :ph)
-                RETURNING id, username, signup_date, floor, grade, pillar_number
+                RETURNING id, username, signup_date, floor, grade, role, pillar_number
                 """
             ),
             {"u": username, "ph": ph},
@@ -623,6 +649,7 @@ def parking_signup(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "floor": created.get("floor"),
         "pillar_number": created.get("pillar_number"),
         "grade": created.get("grade") or "normal",
+        "role": created.get("role") or "STUDENT",
     }
 
 
@@ -642,7 +669,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
                 UPDATE parking_users
                 SET action_date = (now() AT TIME ZONE 'Asia/Seoul')
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
+                RETURNING id, username, signup_date, floor, grade, role, pillar_number, action_date
                 """
             ),
             {"id": int(user["id"])},
@@ -661,6 +688,7 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "floor": row.get("floor"),
         "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
+        "role": row.get("role") or "STUDENT",
     }
 
 
@@ -685,7 +713,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
                 SET floor = :f,
                     action_date = (now() AT TIME ZONE 'Asia/Seoul')
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
+                RETURNING id, username, signup_date, floor, grade, role, pillar_number, action_date
                 """
             ),
             {"f": floor, "id": int(user["id"])},
@@ -704,6 +732,7 @@ def parking_set_floor(req: ParkingUserFloorIn, db: Session = Depends(get_db)):
         "floor": row.get("floor"),
         "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
+        "role": row.get("role") or "STUDENT",
     }
 
 
@@ -733,7 +762,7 @@ def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(ge
                 SET pillar_number = :p,
                     action_date = (now() AT TIME ZONE 'Asia/Seoul')
                 WHERE id = :id
-                RETURNING id, username, signup_date, floor, grade, pillar_number, action_date
+                RETURNING id, username, signup_date, floor, grade, role, pillar_number, action_date
                 """
             ),
             {"p": pillar_number, "id": int(user["id"])},
@@ -752,6 +781,7 @@ def parking_set_pillar_number(req: ParkingUserPillarIn, db: Session = Depends(ge
         "floor": row.get("floor"),
         "pillar_number": row.get("pillar_number"),
         "grade": row.get("grade") or "normal",
+        "role": row.get("role") or "STUDENT",
     }
 
 

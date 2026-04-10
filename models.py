@@ -574,6 +574,26 @@ class ParkingLocation(Base):
         Index("idx_parking_device_floor_zone", "device_id", "floor", "zone"),
     )
 
+class ParkingCount(Base):
+    """
+    일자별 주차앱 회원 지표 저장 테이블.
+    - count_date: 집계 기준일(KST)
+    - dau: 해당 일자의 활성 사용자 수(action_date 기준)
+    - total_count: 해당 일자까지 총 회원 수
+    - daily_count: 해당 일자 가입자 수(signup_date 기준)
+    """
+
+    __tablename__ = "parking_count"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    count_date = Column(Date, nullable=False, unique=True, index=True)
+    dau = Column(Integer, nullable=False, server_default="0")
+    total_count = Column(Integer, nullable=False, server_default="0")
+    daily_count = Column(Integer, nullable=False, server_default="0")
+
+
+
+----------------------------jhr_homework----------------------------------------------------------------
 
 class ParkingUser(Base):
     """
@@ -596,23 +616,46 @@ class ParkingUser(Base):
     signup_date = Column(DateTime(timezone=False), nullable=False, server_default=func.now())
     floor = Column(String(20), nullable=True)
     grade = Column(String(10), nullable=False, server_default="normal")
+    # 조홍래 과제용 역할(STUDENT/CREATOR)
+    role = Column(String(20), nullable=False, server_default="STUDENT")
     pillar_number = Column(String(20), nullable=True)
     action_date = Column(DateTime(timezone=False), nullable=True, server_default=func.now())
 
 
-class ParkingCount(Base):
-    """
-    일자별 주차앱 회원 지표 저장 테이블.
-    - count_date: 집계 기준일(KST)
-    - dau: 해당 일자의 활성 사용자 수(action_date 기준)
-    - total_count: 해당 일자까지 총 회원 수
-    - daily_count: 해당 일자 가입자 수(signup_date 기준)
-    """
 
-    __tablename__ = "parking_count"
+
+class JhrClass(Base):
+    __tablename__ = "jhr_classes"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    count_date = Column(Date, nullable=False, unique=True, index=True)
-    dau = Column(Integer, nullable=False, server_default="0")
-    total_count = Column(Integer, nullable=False, server_default="0")
-    daily_count = Column(Integer, nullable=False, server_default="0")
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    price = Column(Numeric(12, 2), nullable=False, server_default="0")
+    capacity = Column(Integer, nullable=False)
+    current_count = Column(Integer, nullable=False, server_default="0")
+    start_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    end_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(20), nullable=False, server_default="DRAFT", index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_jhr_classes_status_start", "status", "start_date"),
+    )
+
+
+class JhrEnrollment(Base):
+    __tablename__ = "jhr_enrollments"
+
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False, index=True)
+    class_id = Column(BigInteger, nullable=False, index=True)
+    status = Column(String(20), nullable=False, server_default="PENDING", index=True)
+    applied_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    canceled_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "class_id", name="uq_jhr_enrollments_user_class"),
+        Index("ix_jhr_enrollments_class_status", "class_id", "status"),
+    )
