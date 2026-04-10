@@ -260,6 +260,14 @@ class JhrClassOut(BaseModel):
     my_enrollment_id: int | None = None
 
 
+class JhrClassListOut(BaseModel):
+    items: list[JhrClassOut]
+    page: int
+    limit: int
+    total_count: int
+    total_pages: int
+
+
 class JhrEnrollmentReqIn(JhrRoleAuthIn):
     class_id: int = Field(..., ge=1)
 
@@ -355,11 +363,13 @@ def set_jhr_role(req: JhrRoleSetIn, db: Session = Depends(get_db)):
     return {"username": str(updated["username"]), "role": str(updated["role"])}
 
 
-@router.get("/jhr/classes", response_model=list[JhrClassOut])
+@router.get("/jhr/classes", response_model=JhrClassListOut)
 def list_jhr_classes(
     username: str = Query(..., min_length=1, max_length=30),
     password: str = Query(..., min_length=2, max_length=200),
     status: Literal["DRAFT", "OPEN", "CLOSED"] | None = Query(default=None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(3, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
     _ensure_parking_users_schema(db)
@@ -370,6 +380,26 @@ def list_jhr_classes(
     if status is not None:
         cond += " AND c.status = :st"
         params["st"] = status
+    offset = (page - 1) * limit
+    params["offset"] = offset
+    params["limit"] = limit
+    total_count = (
+        db.execute(
+            text(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM jhr_classes c
+                {cond}
+                """
+            ),
+            {k: v for k, v in params.items() if k not in {"offset", "limit"}},
+        )
+        .mappings()
+        .first()
+    )
+    total = int(total_count["cnt"] or 0) if total_count else 0
+    total_pages = max(1, (total + limit - 1) // limit)
+
     rows = (
         db.execute(
             text(
@@ -378,6 +408,8 @@ def list_jhr_classes(
                 FROM jhr_classes c
                 {cond}
                 ORDER BY c.created_at DESC, c.id DESC
+                OFFSET :offset
+                LIMIT :limit
                 """
             ),
             params,
@@ -400,7 +432,13 @@ def list_jhr_classes(
         .all()
     )
     my_map = {int(r["class_id"]): r for r in my_map_rows}
-    return [_row_to_class_out(r, my_map.get(int(r["id"]))) for r in rows]
+    return {
+        "items": [_row_to_class_out(r, my_map.get(int(r["id"]))) for r in rows],
+        "page": page,
+        "limit": limit,
+        "total_count": total,
+        "total_pages": total_pages,
+    }
 
 
 @router.get("/jhr/classes/{class_id}", response_model=JhrClassOut)
