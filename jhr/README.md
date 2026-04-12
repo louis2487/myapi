@@ -74,8 +74,8 @@ GET /jhr/classes/{class_id}/students
 
 ## 데이터 모델 설명
 
-1. jhr_classes  
-강의 정보를 담고 있는 테이블입니다.  
+### 1. Entity Schema: `jhr_classes`
+> 클래스 테이블입니다.
 
 | 필드명 | 데이터 타입 | 제약 사항 | 비고 |
 | :--- | :--- | :--- | :--- |
@@ -92,10 +92,38 @@ GET /jhr/classes/{class_id}/students
 | **created_at** | `timestamp` | **DEFAULT: now()** | 레코드 생성 일시 |
 | **updated_at** | `timestamp` | **DEFAULT: now()** | 레코드 수정 일시 |
 
+  
+### 2. Entity Schema: 'jhr_enrollments`  
+> 수강 신청 테이블입니다.  
 
+| 필드명 | 데이터 타입 | 제약 사항 | 비고 |
+| :--- | :--- | :--- | :--- |
+| **id** | `integer` | **PRIMARY KEY**, Auto Inc. | 신청 고유 식별자 |
+| **user_id** | `bigint` | **NOT NULL** | 신청자(사용자) ID |
+| **class_id** | `integer` | **NOT NULL** | 신청한 강의 ID |
+| **status** | `varchar(20)` | **NOT NULL**, Default: `'PENDING'` |
+| **applied_at** | `timestamp` | Default: `now()` (KST) | 수강 신청 일시 |
+| **confirmed_at** | `timestamp` | - | 수강 확정 일시 |
+| **canceled_at** | `timestamp` | - | 수강 취소 일시 |
 
+  
+### 3. Entity Schema: 'parking_users`  
+> 유저 테이블입니다.    
 
+| 필드명 | 데이터 타입 | 제약 사항 | 비고 |
+| :--- | :--- | :--- | :--- |
+| **id** | `bigint` | **PRIMARY KEY**, Auto Inc. | 사용자 고유 식별자 |
+| **username** | `varchar(30)` | **NOT NULL** | 사용자 계정명 |
+| **password_hash** | `text` | **NOT NULL** | 암호화된 비밀번호 |
+| **signup_date** | `timestamp` | **NOT NULL**, Default: `now()` | 가입 일시 |
+| **floor** | `varchar(20)` | - | 주차 층 정보 |
+| **grade** | `varchar(10)` | **NOT NULL**, Default: `'normal'` | 사용자 등급 |
+| **pillar_number** | `varchar(20)` | - | 기둥 번호 |
+| **action_date** | `timestamp` | Default: `now()` | 최근 활동 일시 |
+| **role** | `varchar(20)` | **NOT NULL**, Default: `'STUDENT'` | 사용자 권한 |
 
+  
+  
 ## 요구사항 해석 및 가정
 ## 설계 결정과 이유
 ## 테스트 실행 방법
