@@ -74,8 +74,8 @@ GET /jhr/classes/{class_id}/students
 
 ## 데이터 모델 설명
 
-### 1. jhr_classes TABLE  
-> 클래스 테이블입니다.
+### 1. jhr_classes 
+> 클래스 테이블로 제목, 상세, 가격, 신청 인원, 정원, 시작일, 종료일 등의 정보를 저장합니다. 
 
 | 필드명 | 데이터 타입 | 제약 사항 | 비고 |
 | :--- | :--- | :--- | :--- |
@@ -93,8 +93,9 @@ GET /jhr/classes/{class_id}/students
 | **updated_at** | `timestamp` | **DEFAULT: now()** | 레코드 수정 일시 |
 
   
-### 2. jhr_enrollments TABLE  
-> 수강 신청 테이블입니다.  
+    
+### 2. jhr_enrollments 
+> 수강 신청 테이블로 유저와 클래스에 대한 상태, 신청일, 결제일, 취소일을 저장합니다.
 
 | 필드명 | 데이터 타입 | 제약 사항 | 비고 |
 | :--- | :--- | :--- | :--- |
@@ -107,8 +108,9 @@ GET /jhr/classes/{class_id}/students
 | **canceled_at** | `timestamp` | - | 수강 취소 일시 |
 
   
-### 3. parking_users TABLE  
-> 유저 테이블입니다.    
+  
+### 3. parking_users  
+> 서비스 유저 테이블로 테스터 계정의 역할을 저장합니다.  
 
 | 필드명 | 데이터 타입 | 제약 사항 | 비고 |
 | :--- | :--- | :--- | :--- |
