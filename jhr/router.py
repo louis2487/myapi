@@ -21,7 +21,6 @@ from .schemas import (
     JhrClassListOut,
     JhrClassOut,
     JhrClassStatusChangeIn,
-    JhrClassStatusIn,
     JhrClassUpdateIn,
     JhrEnrollmentActionIn,
     JhrEnrollmentOut,
@@ -327,56 +326,6 @@ def update_jhr_class(class_id: int, req: JhrClassUpdateIn, db: Session = Depends
                 "ed": next_end,
                 "st": next_status,
             },
-        )
-        .mappings()
-        .first()
-    )
-    _record_daily_activity(db, int(creator["id"]))
-    db.commit()
-    return _row_to_class_out(updated, None)
-
-
-@router.put("/jhr/classes/{class_id}/status", response_model=JhrClassOut)
-def update_jhr_class_status(class_id: int, req: JhrClassStatusIn, db: Session = Depends(get_db)):
-    _ensure_parking_users_schema(db)
-    _ensure_jhr_schema(db)
-    _ensure_parking_daily_activity_schema(db)
-
-    creator = _require_creator(db, req.username.strip(), req.password)
-    row = (
-        db.execute(
-            text("SELECT * FROM jhr_classes WHERE id = :id FOR UPDATE"),
-            {"id": class_id},
-        )
-        .mappings()
-        .first()
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail="Class not found.")
-    if int(row.get("creator_user_id") or 0) != int(creator["id"]):
-        raise HTTPException(status_code=403, detail="Only class creator can update.")
-
-    current_status = str(row.get("status") or "DRAFT")
-    next_status = req.status
-    if current_status == "DRAFT" and next_status != "OPEN":
-        raise HTTPException(status_code=400, detail="DRAFT can change only to OPEN.")
-    if current_status == "OPEN" and next_status != "CLOSED":
-        raise HTTPException(status_code=400, detail="OPEN can change only to CLOSED.")
-    if current_status == "CLOSED":
-        raise HTTPException(status_code=400, detail="CLOSED cannot be changed.")
-
-    updated = (
-        db.execute(
-            text(
-                """
-                UPDATE jhr_classes
-                SET status = :st,
-                    updated_at = now()
-                WHERE id = :id
-                RETURNING *
-                """
-            ),
-            {"st": next_status, "id": class_id},
         )
         .mappings()
         .first()
