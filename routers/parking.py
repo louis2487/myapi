@@ -431,6 +431,10 @@ class ParkingUserOut(BaseModel):
     role: Literal["STUDENT", "CREATOR"] = "STUDENT"
 
 
+class ParkingLogoutOut(BaseModel):
+    status: Literal["ok"] = "ok"
+
+
 class ParkingUserFloorIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=30)
     password: str = Field(..., min_length=2, max_length=200)
@@ -692,6 +696,34 @@ def parking_me(req: ParkingAuthIn, db: Session = Depends(get_db)):
         "grade": row.get("grade") or "normal",
         "role": row.get("role") or "STUDENT",
     }
+
+
+@router.post("/parking/auth/logout", response_model=ParkingLogoutOut)
+def parking_logout(req: ParkingAuthIn, db: Session = Depends(get_db)):
+    """
+    자격 증명을 검증한 뒤 로그아웃을 기록합니다.
+    서버 세션은 없으며, 클라이언트는 응답 후 로컬 저장 자격 증명을 삭제하면 됩니다.
+    """
+    _ensure_parking_users_schema(db)
+    _ensure_parking_daily_activity_schema(db)
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required.")
+
+    user = _require_parking_user(db, username, req.password)
+    db.execute(
+        text(
+            """
+            UPDATE parking_users
+            SET action_date = (now() AT TIME ZONE 'Asia/Seoul')
+            WHERE id = :id
+            """
+        ),
+        {"id": int(user["id"])},
+    )
+    _record_daily_activity(db, int(user["id"]))
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.put("/parking/auth/me/floor", response_model=ParkingUserOut)
