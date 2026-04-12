@@ -76,6 +76,7 @@ GET /jhr/classes/{class_id}/students
 
 1. jhr_classes  
 강의 정보를 담고 있는 테이블입니다.  
+
 | 필드명 | 데이터 타입 | 제약 사항 | 비고 |
 | :--- | :--- | :--- | :--- |
 | **id** | `bigint` | **PRIMARY KEY**, Auto Inc. | 고유 식별자 |
@@ -90,6 +91,7 @@ GET /jhr/classes/{class_id}/students
 | **creator_user_id** | `bigint` | **NOT NULL** | 등록자 식별 ID |
 | **created_at** | `timestamp` | **DEFAULT: now()** | 레코드 생성 일시 |
 | **updated_at** | `timestamp` | **DEFAULT: now()** | 레코드 수정 일시 |
+
 
 
 
