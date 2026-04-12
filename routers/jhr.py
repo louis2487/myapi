@@ -1015,8 +1015,7 @@ def list_class_students(
     )
     if not class_row:
         raise HTTPException(status_code=404, detail="Class not found.")
-    if int(class_row.get("creator_user_id") or 0) != int(creator["id"]):
-        raise HTTPException(status_code=403, detail="Only class creator can view students.")
+    # 역할이 CREATOR이면 해당 강의 개설자가 아니어도 수강생 목록 조회 허용
 
     rows = (
         db.execute(
