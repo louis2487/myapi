@@ -1,8 +1,12 @@
 ## 프로젝트 개요
-라이브클래스 채용팀으로부터 받은 테스트 과제입니다.  
+라이브클래스 채용팀으로부터 받은 백엔드 테스트 과제입니다.  
 
-선택 : 과제 A — 수강 신청 시스템
+선택 : 과제 A — 수강 신청 시스템  
+  
+FRONT : https://github.com/louis2487/smartparking/tree/master/app/jhr  
 
+BACKEND : https://github.com/louis2487/myapi/tree/main/jhr (현재 경로)  
+  
 
 ## 기술 스택
 front : React Native(app)  
@@ -21,7 +25,8 @@ Hosting : Railway
 Google PlayStore에서 '스마트파킹-청북세종헤르메스 주차관리'앱을 검색하고 설치합니다.  
 
 ID : 라이브클래스  
-PASSWORD : 123  
+
+PASSWORD : 123    
 
 해당 테스트 계정으로 로그인합니다.  
 
