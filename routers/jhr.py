@@ -322,13 +322,19 @@ def _row_to_class_out(row, my_row=None):
     }
 
 
-@router.post("/jhr/role", response_model=JhrRoleOut)
-def get_jhr_role(req: JhrRoleAuthIn, db: Session = Depends(get_db)):
+#---------------API Router-----------------------------------------------------------------------------------
+
+@router.get("/jhr/role", response_model=JhrRoleOut)
+def get_jhr_role(
+    username: str = Query(..., min_length=1, max_length=30),
+    password: str = Query(..., min_length=2, max_length=200),
+    db: Session = Depends(get_db),
+):
     _ensure_parking_users_schema(db)
-    username = req.username.strip()
+    username = username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username is required.")
-    row = _require_parking_user(db, username, req.password)
+    row = _require_parking_user(db, username, password)
     return {"username": str(row["username"]), "role": str(row.get("role") or "STUDENT")}
 
 
@@ -1015,7 +1021,8 @@ def list_class_students(
     )
     if not class_row:
         raise HTTPException(status_code=404, detail="Class not found.")
-    # 역할이 CREATOR이면 해당 강의 개설자가 아니어도 수강생 목록 조회 허용
+    if int(class_row.get("creator_user_id") or 0) != int(creator["id"]):
+        raise HTTPException(status_code=403, detail="Only class creator can view students.")
 
     rows = (
         db.execute(
