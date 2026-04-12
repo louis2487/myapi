@@ -55,7 +55,7 @@ from routers.parking_popup import router as parking_popup_router
 from routers.upload import mount_static, router as upload_router
 from routers.community import router as community_router
 from routers.parking import router as parking_router
-from routers.jhr import router as jhr_router
+from jhr import router as jhr_router
 from routers.admin_migration_uploads import router as admin_migration_uploads_router
 from routers.favicon import router as favicon_router
 
