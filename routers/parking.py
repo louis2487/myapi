@@ -146,6 +146,8 @@ def _ensure_parking_users_schema(db: Session):
                 """
             )
         )
+        # JHR 역할은 parking_users.role 만 사용. 과거 중복 컬럼이 있으면 제거.
+        db.execute(text("ALTER TABLE parking_users DROP COLUMN IF EXISTS jhr_role"))
         db.commit()
     except Exception:
         db.rollback()
