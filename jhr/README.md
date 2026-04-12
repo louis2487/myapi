@@ -1,14 +1,18 @@
 ## 프로젝트 개요
-과제 A — 수강 신청 시스템
-라이브클래스 채용팀으로부터 받은 테스트 과제입니다.
+라이브클래스 채용팀으로부터 받은 테스트 과제입니다.  
+선택 : 과제 A — 수강 신청 시스템
 
 
 ## 기술 스택
-front : React Native(app)
-client : Axio Fetch
-server : fastAPI
-DB : postgreSQL
-Hosting : Railway
+front : React Native(app)  
+
+client : Axio Fetch  
+
+server : fastAPI  
+
+DB : postgreSQL  
+Hosting : Railway  
+
 
 
 ## 실행 방법
